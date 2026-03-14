@@ -85,21 +85,22 @@ Available commands in the VS Code Command Palette:
 
 ## Installation
 
-### VS Code Marketplace
+The extension is not yet available on the VS Code Marketplace. For now, install it manually from a `.vsix` package.
 
-1. Open the Extensions view
-2. Search for `Codex Accounts Manager`
-3. Click Install
+### Option 1: Install from VSIX
 
-### Install from VSIX
+1. Download the released `.vsix` file
+2. Open the Command Palette in VS Code
+3. Run `Extensions: Install from VSIX...`
+4. Select the downloaded `.vsix` file
+
+Or install from the command line:
 
 ```bash
 code --install-extension codex-accounts-manager-x.y.z.vsix
 ```
 
----
-
-## Build from Source
+### Option 2: Run from Source
 
 ```bash
 git clone https://github.com/wannanbigpig/codex-tools.git
@@ -110,7 +111,9 @@ npm run compile
 
 Press `F5` in VS Code to launch an Extension Development Host.
 
-Package command:
+---
+
+## Package VSIX
 
 ```bash
 npx @vscode/vsce package
