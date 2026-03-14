@@ -12,7 +12,7 @@ VS Code extension for managing multiple Codex accounts, viewing quota usage, and
 
 ### Quota Dashboard
 
-![Codex Tools quota dashboard](https://raw.githubusercontent.com/wannanbigpig/codex-tools/main/media/image.png)
+![Codex Tools quota dashboard](https://raw.githubusercontent.com/wannanbigpig/codex-tools/master/media/image.png)
 
 The extension provides a Webview dashboard for managing and monitoring all saved Codex accounts in one place:
 
