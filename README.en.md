@@ -10,6 +10,14 @@ VS Code extension for managing multiple Codex accounts, viewing quota usage, and
 
 ---
 
+Manage multiple Codex accounts inside VS Code, inspect quota usage, switch the active global account, and monitor key quota data from the status bar.
+
+**Features:** quota dashboard, multi-account management, OAuth sign-in, current `auth.json` import, single/all quota refresh, status bar monitoring, details panel, bilingual UI.
+
+**Language:** follows the current VS Code display language. Currently supports Simplified Chinese and English.
+
+---
+
 ## Overview
 
 ### Quota Dashboard
@@ -46,6 +54,12 @@ Each account can show:
 - Show the current account quota summary in the VS Code status bar
 - Pin selected accounts from the dashboard into status visibility
 - Click the status bar entry to open the full quota dashboard
+
+### Bilingual UI
+
+- Automatically follows the current VS Code display language
+- Supports Simplified Chinese and English
+- Dashboard copy, prompts, and interaction text switch with the editor language
 
 ### Details Panel
 
