@@ -2,7 +2,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { loginWithOAuth } from "../auth/oauth";
 import { getCodexHome } from "../codex/authFile";
-import { refreshQuota } from "../services/quota";
+import { QuotaRefreshResult, refreshQuota } from "../services/quota";
 import { AccountsRepository } from "../storage/accounts";
 import { openDetailsPanel } from "../ui/details";
 import { openQuotaSummaryPanel } from "../ui/quotaSummary";
@@ -37,8 +37,13 @@ export function registerCommands(
       const copy = getCommandCopy();
       await withProgress(copy.progressImportCurrent, async () => {
         const account = await repo.importCurrentAuth();
+        const result = await refreshImportedAccountQuota(repo, account.id);
         view.refresh();
-        vscode.window.showInformationMessage(copy.importedCurrent(account.email));
+        if (result.error) {
+          vscode.window.showWarningMessage(copy.importedButQuotaFailed(account.email, result.error.message));
+        } else {
+          vscode.window.showInformationMessage(copy.importedAndRefreshed(account.email));
+        }
       });
     }),
     vscode.commands.registerCommand("codexAccounts.switchAccount", async (item?: CodexAccountRecord) => {
@@ -179,6 +184,25 @@ async function refreshSingleQuota(
   }
 }
 
+export async function refreshImportedAccountQuota(
+  repo: AccountsRepository,
+  accountId: string
+): Promise<QuotaRefreshResult> {
+  const account = await repo.getAccount(accountId);
+  if (!account) {
+    throw new Error(`Account not found: ${accountId}`);
+  }
+
+  const tokens = await repo.getTokens(accountId);
+  if (!tokens) {
+    throw new Error(`Tokens missing for ${account.email}`);
+  }
+
+  const result = await refreshQuota(account, tokens);
+  await repo.updateQuota(accountId, result.quota, result.error, result.updatedTokens, result.updatedPlanType);
+  return result;
+}
+
 async function pickAccount(
   repo: AccountsRepository,
   placeHolder: string
@@ -247,8 +271,10 @@ function getCommandCopy() {
       zh ? `已添加 Codex 账号 ${email}，但刷新配额失败：${message}` : `Added Codex account ${email}, but quota refresh failed: ${message}`,
     addAccountFailed: (message: string) =>
       zh ? `添加账号失败：${message}` : `Add account failed: ${message}`,
-    importedCurrent: (email: string) =>
-      zh ? `已将当前 auth.json 导入为 ${email}` : `Imported current auth.json as ${email}`,
+    importedAndRefreshed: (email: string) =>
+      zh ? `已导入当前 auth.json 为 ${email}，并已刷新配额` : `Imported current auth.json as ${email} and refreshed quota`,
+    importedButQuotaFailed: (email: string, message: string) =>
+      zh ? `已导入当前 auth.json 为 ${email}，但刷新配额失败：${message}` : `Imported current auth.json as ${email}, but quota refresh failed: ${message}`,
     refreshedCount: (count: number) =>
       zh ? `已刷新 ${count} 个账号的配额` : `Refreshed quota for ${count} account(s)`,
     confirmRemove: (email: string) =>
