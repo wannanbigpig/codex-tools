@@ -1,8 +1,9 @@
 import * as crypto from "crypto";
 import * as http from "http";
 import * as vscode from "vscode";
-import { CodexTokens } from "../types";
+import { CodexTokens } from "../core/types";
 import { isTokenExpired } from "../utils/jwt";
+import { AuthError, ErrorCode, APIError } from "../core/errors";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const AUTH_ENDPOINT = "https://auth.openai.com/oauth/authorize";
@@ -38,7 +39,9 @@ export async function loginWithOAuth(): Promise<CodexTokens> {
   const opened = await vscode.env.openExternal(vscode.Uri.parse(authUrl));
   if (!opened) {
     void vscode.env.clipboard.writeText(authUrl);
-    throw new Error("Unable to open the browser automatically. The authorization URL was copied to your clipboard.");
+    throw new AuthError("Unable to open the browser automatically. The authorization URL was copied to your clipboard.", {
+      code: ErrorCode.AUTH_OAUTH_FAILED
+    });
   }
 
   if (!available) {
@@ -82,7 +85,10 @@ export async function refreshTokens(refreshToken: string): Promise<CodexTokens> 
 
   const raw = await response.text();
   if (!response.ok) {
-    throw new Error(`Token refresh failed: ${raw}`);
+    throw new APIError(`Token refresh failed: ${raw}`, {
+      statusCode: response.status,
+      responseBody: raw
+    });
   }
 
   const payload = JSON.parse(raw) as Record<string, unknown>;
@@ -146,11 +152,7 @@ async function waitForCode(session: OAuthSession): Promise<string> {
   });
 }
 
-async function exchangeCodeForTokens(
-  code: string,
-  verifier: string,
-  redirectUri: string
-): Promise<CodexTokens> {
+async function exchangeCodeForTokens(code: string, verifier: string, redirectUri: string): Promise<CodexTokens> {
   const response = await fetch(TOKEN_ENDPOINT, {
     method: "POST",
     headers: {
@@ -167,7 +169,10 @@ async function exchangeCodeForTokens(
 
   const raw = await response.text();
   if (!response.ok) {
-    throw new Error(`Token exchange failed: ${raw}`);
+    throw new APIError(`Token exchange failed: ${raw}`, {
+      statusCode: response.status,
+      responseBody: raw
+    });
   }
 
   const payload = JSON.parse(raw) as Record<string, unknown>;
@@ -192,11 +197,7 @@ async function canBindPort(port: number): Promise<boolean> {
   });
 }
 
-async function promptForManualCallback(
-  authUrl: string,
-  redirectUri: string,
-  expectedState: string
-): Promise<string> {
+async function promptForManualCallback(authUrl: string, redirectUri: string, expectedState: string): Promise<string> {
   await vscode.env.clipboard.writeText(authUrl);
 
   await vscode.window.showInformationMessage(
@@ -218,14 +219,18 @@ async function promptForManualCallback(
   });
 
   if (!pasted) {
-    throw new Error("OAuth login cancelled before callback URL was provided.");
+    throw new AuthError("OAuth login cancelled before callback URL was provided.", {
+      code: ErrorCode.AUTH_OAUTH_FAILED
+    });
   }
 
   const url = new URL(pasted.trim());
   const state = url.searchParams.get("state");
   const code = url.searchParams.get("code");
   if (state !== expectedState || !code) {
-    throw new Error("Invalid callback URL pasted.");
+    throw new AuthError("Invalid callback URL pasted.", {
+      code: ErrorCode.AUTH_TOKEN_INVALID
+    });
   }
 
   return code;
@@ -262,7 +267,10 @@ function sha256Base64Url(value: string): string {
 function readString(record: Record<string, unknown>, key: string): string {
   const value = record[key];
   if (typeof value !== "string" || !value) {
-    throw new Error(`Missing ${key} in OAuth response`);
+    throw new AuthError(`Missing ${key} in OAuth response`, {
+      code: ErrorCode.AUTH_TOKEN_MISSING,
+      context: { key }
+    });
   }
   return value;
 }

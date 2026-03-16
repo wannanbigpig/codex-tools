@@ -1,7 +1,9 @@
 import * as vscode from "vscode";
-import { AccountsRepository } from "../storage/accounts";
-import { CodexAccountRecord } from "../types";
+import { AccountsRepository } from "../storage";
+import { CodexAccountRecord } from "../core/types";
 import { formatRelativeReset } from "../utils/time";
+import { t } from "../utils";
+import { escapeMarkdown } from "../utils";
 
 const STATUS_BAR_ICON = "$(dashboard)";
 
@@ -21,10 +23,15 @@ export class AccountsStatusBarProvider {
   async refresh(): Promise<void> {
     const accounts = await this.repo.listAccounts();
     const active = accounts.find((item) => item.isActive) ?? accounts[0];
+    const _t = t();
 
     if (!active) {
       this.item.text = `${STATUS_BAR_ICON} codex-tools`;
-      this.item.tooltip = new vscode.MarkdownString("codex-tools quota monitor\n\nNo Codex accounts saved yet.");
+      const md = new vscode.MarkdownString(undefined, true);
+      md.isTrusted = true;
+      md.appendMarkdown(`**${_t("panel.dashboard.title")}**\n\n`);
+      md.appendMarkdown(_t("status.noAccounts"));
+      this.item.tooltip = md;
       this.item.show();
       return;
     }
@@ -45,6 +52,7 @@ function buildStatusText(account: CodexAccountRecord): string {
 }
 
 function buildTooltip(active: CodexAccountRecord, accounts: CodexAccountRecord[]): vscode.MarkdownString {
+  const _t = t();
   const md = new vscode.MarkdownString(undefined, true);
   md.isTrusted = true;
   const selectedExtras = accounts
@@ -52,14 +60,14 @@ function buildTooltip(active: CodexAccountRecord, accounts: CodexAccountRecord[]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 2);
 
-  md.appendMarkdown(`**codex-tools · 配额速览**\n\n`);
+  md.appendMarkdown(`**${_t("panel.dashboard.title")}**\n\n`);
   md.appendMarkdown(renderAccountPanel(active, true));
   for (const account of selectedExtras) {
     md.appendMarkdown(`\n`);
     md.appendMarkdown(renderAccountPanel(account, false));
   }
 
-  md.appendMarkdown(`\n\n---\n点击打开完整配额面板`);
+  md.appendMarkdown(`\n\n---\n${_t("status.tooltip")}`);
   return md;
 }
 
@@ -118,8 +126,4 @@ function quotaMarker(value?: number): string {
     return "🟡";
   }
   return "🔴";
-}
-
-function escapeMarkdown(value: string): string {
-  return value.replace(/([\\`*_{}[\]()#+\-.!|>])/g, "\\$1");
 }

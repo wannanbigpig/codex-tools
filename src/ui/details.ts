@@ -1,10 +1,24 @@
+/**
+ * 账号详情面板模块
+ *
+ * 优化内容:
+ * - 添加 JSDoc 注释
+ * - 修复未使用参数警告
+ * - 添加类型守卫
+ * - 复用共享 UI 工具函数
+ */
+
 import * as vscode from "vscode";
-import { CodexAccountRecord } from "../types";
+import { CodexAccountRecord } from "../core/types";
 import { formatRelativeReset, formatTimestamp } from "../utils/time";
+import { colorForPercentage, escapeHtml, prettyAuthProvider } from "../utils";
 
 let detailsPanel: vscode.WebviewPanel | undefined;
 
-export function openDetailsPanel(context: vscode.ExtensionContext, account: CodexAccountRecord): void {
+/**
+ * 打开账号详情面板
+ */
+export function openDetailsPanel(_context: vscode.ExtensionContext, account: CodexAccountRecord): void {
   if (!detailsPanel) {
     detailsPanel = vscode.window.createWebviewPanel(
       "codexAccountDetails",
@@ -262,34 +276,4 @@ function renderHtml(account: CodexAccountRecord): string {
   </div>
 </body>
 </html>`;
-}
-
-function colorForPercentage(value?: number): string {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return "#7ddc7a";
-  }
-  if (value >= 60) {
-    return "#7ddc7a";
-  }
-  if (value >= 20) {
-    return "#fbbf24";
-  }
-  return "#ef4444";
-}
-
-function prettyAuthProvider(value?: string): string {
-  if (!value) {
-    return "OpenAI";
-  }
-  if (value.toLowerCase() === "google") {
-    return "Google";
-  }
-  return value[0].toUpperCase() + value.slice(1);
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
 }

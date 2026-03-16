@@ -2,7 +2,7 @@
   "name": "codex-accounts-manager",
   "displayName": "Codex Accounts Manager",
   "description": "Manage multiple Codex accounts in VS Code, inspect quota, and switch the active global auth.json.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "wannanbigpig",
   "icon": "media/CT_logo_transparent_square_hd.png",
   "license": "MIT",
@@ -17,15 +17,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished",
-    "onCommand:codexAccounts.addAccount",
-    "onCommand:codexAccounts.importCurrentAuth",
-    "onCommand:codexAccounts.switchAccount",
-    "onCommand:codexAccounts.refreshQuota",
-    "onCommand:codexAccounts.refreshAllQuotas",
-    "onCommand:codexAccounts.removeAccount",
-    "onCommand:codexAccounts.openDetails",
-    "onCommand:codexAccounts.showQuotaSummary"
+    "onStartupFinished"    
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -72,11 +64,19 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package"
+    "package": "vsce package",
+    "lint": "eslint src --ext ts",
+    "lint:fix": "eslint src --ext ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\""
   },
   "devDependencies": {
     "@types/node": "^20.16.11",
     "@types/vscode": "^1.96.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
     "typescript": "^5.7.2",
     "@vscode/vsce": "^3.2.1"
   }

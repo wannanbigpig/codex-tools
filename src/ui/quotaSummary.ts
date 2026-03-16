@@ -1,27 +1,20 @@
 import * as vscode from "vscode";
-import { AccountsRepository } from "../storage/accounts";
-import { CodexAccountRecord } from "../types";
+import { AccountsRepository } from "../storage";
+import { CodexAccountRecord } from "../core/types";
 import { formatRelativeReset, formatTimestamp } from "../utils/time";
+import { colorForPercentage, escapeHtml, escapeHtmlAttr } from "../utils";
 
 let quotaSummaryPanel: vscode.WebviewPanel | undefined;
 
-export function openQuotaSummaryPanel(
-  context: vscode.ExtensionContext,
-  repo: AccountsRepository
-): void {
+export function openQuotaSummaryPanel(context: vscode.ExtensionContext, repo: AccountsRepository): void {
   const lang = resolveLanguage();
   const t = lang === "zh" ? zh : en;
   const iconUri = vscode.Uri.joinPath(context.extensionUri, "media", "CT_logo_transparent_square_hd.png");
   if (!quotaSummaryPanel) {
-    quotaSummaryPanel = vscode.window.createWebviewPanel(
-      "codexQuotaSummary",
-      t.panelTitle,
-      vscode.ViewColumn.Beside,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true
-      }
-    );
+    quotaSummaryPanel = vscode.window.createWebviewPanel("codexQuotaSummary", t.panelTitle, vscode.ViewColumn.Beside, {
+      enableScripts: true,
+      retainContextWhenHidden: true
+    });
     quotaSummaryPanel.iconPath = iconUri;
 
     quotaSummaryPanel.onDidDispose(() => {
@@ -96,7 +89,7 @@ function renderHtml(accounts: CodexAccountRecord[], logoUri: string): string {
   );
   const active = sorted[0];
   const activeEmail = active?.email ?? t.unknown;
-  const activeTeam = active?.accountName?.trim() || t.unknown;
+  const activeTeam = active?.accountName?.trim() ?? t.unknown;
 
   return `<!DOCTYPE html>
 <html lang="${lang}">
@@ -717,7 +710,14 @@ function renderHtml(accounts: CodexAccountRecord[], logoUri: string): string {
       </div>
       ${active ? renderPrimarySection(accountWithTranslations(active, t), t) : `<div class="identity">${escapeHtml(t.empty)}</div>`}
     </section>
-    ${sorted.length ? `<section class="section">${renderSavedAccounts(sorted.map((account) => accountWithTranslations(account, t)), t)}</section>` : ""}
+    ${
+      sorted.length
+        ? `<section class="section">${renderSavedAccounts(
+            sorted.map((account) => accountWithTranslations(account, t)),
+            t
+          )}</section>`
+        : ""
+    }
   </div>
   <script>
     const vscode = acquireVsCodeApi();
@@ -788,11 +788,15 @@ function renderSavedCard(account: LocalizedAccount, t: CopySet, extraSelectedCou
       : t.statusToggleTip;
   return `<article class="saved-card ${account.isActive ? "active" : ""}">
     <div class="saved-head">
-      ${account.isActive ? "" : `<label class="saved-toggle ${toggleDisabled ? "disabled" : ""}" title="${escapeHtmlAttr(toggleTitle)}" aria-label="${escapeHtmlAttr(toggleTitle)}">
+      ${
+        account.isActive
+          ? ""
+          : `<label class="saved-toggle ${toggleDisabled ? "disabled" : ""}" title="${escapeHtmlAttr(toggleTitle)}" aria-label="${escapeHtmlAttr(toggleTitle)}">
         <input type="checkbox" ${account.showInStatusBar ? "checked" : ""} ${toggleDisabled ? "disabled" : ""} onchange="send('toggleStatusBar', '${escapeHtmlAttr(account.id)}')" />
         <span class="saved-toggle-mark"></span>
         <span class="saved-toggle-text">${escapeHtml(t.statusShort)}</span>
-      </label>`}
+      </label>`
+      }
       <div class="saved-title">
         <h3>${escapeHtml(account.email)}</h3>
         <div class="saved-sub">${escapeHtml(t.teamName)}: ${escapeHtml(account.accountName ?? t.unknown)}</div>
@@ -833,6 +837,9 @@ function renderPrimaryGauge(label: string, percent?: number, resetAt?: number): 
   </div>`;
 }
 
+/**
+ * 渲染指标行
+ */
 function renderMetric(label: string, percent?: number, resetAt?: number): string {
   const clamped = typeof percent === "number" ? Math.max(0, Math.min(100, percent)) : 0;
   const color = colorForPercentage(percent);
@@ -849,20 +856,9 @@ function renderMetric(label: string, percent?: number, resetAt?: number): string
   </div>`;
 }
 
-function renderMiniMetric(label: string, percent?: number, resetAt?: number): string {
-  const clamped = typeof percent === "number" ? Math.max(0, Math.min(100, percent)) : 0;
-  const color = colorForPercentage(percent);
-  const resetText = formatMiniResetText(resetAt);
-  return `<div class="mini-metric">
-    <div class="mini-row">
-      <span class="mini-label">${escapeHtml(label)}</span>
-      <span class="mini-bar"><span style="width:${clamped}%; --metric-color:${color};"></span></span>
-      <span class="mini-value">${typeof percent === "number" ? `${percent}%` : "--"}</span>
-    </div>
-    <div class="mini-foot">${escapeHtml(resetText)}</div>
-  </div>`;
-}
-
+/**
+ * 格式化重置时间文本
+ */
 function formatResetText(resetAt: number | undefined, t: CopySet): string {
   if (!resetAt) {
     return t.resetUnknown;
@@ -874,26 +870,6 @@ function formatResetText(resetAt: number | undefined, t: CopySet): string {
   const hh = String(target.getHours()).padStart(2, "0");
   const min = String(target.getMinutes()).padStart(2, "0");
   return `${formatRelativeReset(resetAt)} (${mm}/${dd} ${hh}:${min})`;
-}
-
-function formatMiniResetText(resetAt?: number): string {
-  if (!resetAt) {
-    return resolveLanguage() === "zh" ? zh.unknown : en.unknown;
-  }
-
-  const target = new Date(resetAt * 1000);
-  const mm = String(target.getMonth() + 1).padStart(2, "0");
-  const dd = String(target.getDate()).padStart(2, "0");
-  const hh = String(target.getHours()).padStart(2, "0");
-  const min = String(target.getMinutes()).padStart(2, "0");
-  return `${formatRelativeReset(resetAt)} (${mm}/${dd} ${hh}:${min})`;
-}
-
-function shorten(value: string, max = 28): string {
-  if (value.length <= max) {
-    return value;
-  }
-  return `${value.slice(0, max)}...`;
 }
 
 interface CopySet {
@@ -1020,7 +996,7 @@ function resolveLanguage(): "zh" | "en" {
   return language.startsWith("zh") ? "zh" : "en";
 }
 
-function accountWithTranslations(account: CodexAccountRecord, t: CopySet): LocalizedAccount {
+function accountWithTranslations(account: CodexAccountRecord, _t: CopySet): LocalizedAccount {
   return {
     ...account,
     authProviderLabel: formatAuthProvider(account.authProvider, resolveLanguage()),
@@ -1029,7 +1005,7 @@ function accountWithTranslations(account: CodexAccountRecord, t: CopySet): Local
 }
 
 function formatAuthProvider(value: string | undefined, lang: "zh" | "en"): string {
-  const provider = value?.trim() || "OpenAI";
+  const provider = value?.trim() ?? "OpenAI";
   if (lang === "zh") {
     return `${provider} 登录`;
   }
@@ -1037,7 +1013,7 @@ function formatAuthProvider(value: string | undefined, lang: "zh" | "en"): strin
 }
 
 function formatAccountStructure(value: string | undefined, lang: "zh" | "en"): string {
-  const normalized = (value || "workspace").toLowerCase();
+  const normalized = (value ?? "workspace").toLowerCase();
   if (lang === "zh") {
     if (normalized === "organization") {
       return "组织空间";
@@ -1051,25 +1027,4 @@ function formatAccountStructure(value: string | undefined, lang: "zh" | "en"): s
     return "工作空间";
   }
   return normalized;
-}
-
-function colorForPercentage(value?: number): string {
-  if (typeof value !== "number") {
-    return "#7ddc7a";
-  }
-  if (value >= 60) {
-    return "#7ddc7a";
-  }
-  if (value >= 20) {
-    return "#fbbf24";
-  }
-  return "#ef4444";
-}
-
-function escapeHtml(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
-function escapeHtmlAttr(value: string): string {
-  return escapeHtml(value).replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { CodexTokens } from "../types";
+import { CodexTokens } from "../core/types";
 
 const SECRET_PREFIX = "codex.account.";
 

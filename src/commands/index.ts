@@ -1,13 +1,28 @@
+/**
+ * 命令处理模块
+ *
+ * 优化内容:
+ * - 使用统一的 i18n 工具处理国际化
+ * - 使用统一的错误类型处理异常
+ * - 移除重复的 getCommandCopy 函数
+ * - 添加更详细的 JSDoc 注释
+ */
+
 import * as path from "path";
 import * as vscode from "vscode";
-import { loginWithOAuth } from "../auth/oauth";
-import { getCodexHome } from "../codex/authFile";
-import { QuotaRefreshResult, refreshQuota } from "../services/quota";
-import { AccountsRepository } from "../storage/accounts";
-import { openDetailsPanel } from "../ui/details";
+import { loginWithOAuth } from "../auth";
+import { getCodexHome } from "../codex";
+import { QuotaRefreshResult, refreshQuota } from "../services";
+import { AccountsRepository } from "../storage";
+import { openDetailsPanel } from "../ui";
 import { openQuotaSummaryPanel } from "../ui/quotaSummary";
-import { CodexAccountRecord } from "../types";
+import { CodexAccountRecord } from "../core/types";
+import { getCommandCopy, restartCodexAppIfInstalled } from "../utils";
+import { createError, getErrorMessage } from "../core";
 
+/**
+ * 注册所有命令
+ */
 export function registerCommands(
   context: vscode.ExtensionContext,
   repo: AccountsRepository,
@@ -24,13 +39,13 @@ export function registerCommands(
           await repo.updateQuota(account.id, result.quota, result.error, result.updatedTokens, result.updatedPlanType);
           view.refresh();
           if (result.error) {
-            vscode.window.showWarningMessage(copy.addedButQuotaFailed(account.email, result.error.message));
+            void vscode.window.showWarningMessage(copy.addedButQuotaFailed(account.email, result.error.message));
           } else {
-            vscode.window.showInformationMessage(copy.addedAndRefreshed(account.email));
+            void vscode.window.showInformationMessage(copy.addedAndRefreshed(account.email));
           }
         });
       } catch (error) {
-        vscode.window.showErrorMessage(copy.addAccountFailed(error instanceof Error ? error.message : String(error)));
+        void vscode.window.showErrorMessage(copy.addAccountFailed(getErrorMessage(error)));
       }
     }),
     vscode.commands.registerCommand("codexAccounts.importCurrentAuth", async () => {
@@ -40,9 +55,9 @@ export function registerCommands(
         const result = await refreshImportedAccountQuota(repo, account.id);
         view.refresh();
         if (result.error) {
-          vscode.window.showWarningMessage(copy.importedButQuotaFailed(account.email, result.error.message));
+          void vscode.window.showWarningMessage(copy.importedButQuotaFailed(account.email, result.error.message));
         } else {
-          vscode.window.showInformationMessage(copy.importedAndRefreshed(account.email));
+          void vscode.window.showInformationMessage(copy.importedAndRefreshed(account.email));
         }
       });
     }),
@@ -54,12 +69,13 @@ export function registerCommands(
       }
 
       if (account.isActive) {
-        vscode.window.showInformationMessage(copy.alreadyActive(formatAccountToastLabel(account)));
+        void vscode.window.showInformationMessage(copy.alreadyActive(formatAccountToastLabel(account)));
         return;
       }
 
       await withProgress(copy.progressSwitch(account.email), async () => {
         await repo.switchAccount(account.id);
+        await restartCodexAppIfInstalled();
         view.refresh();
         const choice = await vscode.window.showInformationMessage(
           copy.switchedAndAskReload(account.email),
@@ -90,7 +106,7 @@ export function registerCommands(
         }
       });
       view.refresh();
-      vscode.window.showInformationMessage(copy.refreshedCount(accounts.length));
+      void vscode.window.showInformationMessage(copy.refreshedCount(accounts.length));
     }),
     vscode.commands.registerCommand("codexAccounts.removeAccount", async (item?: CodexAccountRecord) => {
       const copy = getCommandCopy();
@@ -119,7 +135,7 @@ export function registerCommands(
       }
 
       if (account.isActive) {
-        vscode.window.showInformationMessage(copy.activeAlwaysInStatus);
+        void vscode.window.showInformationMessage(copy.activeAlwaysInStatus);
         return;
       }
 
@@ -127,13 +143,11 @@ export function registerCommands(
         const updated = await repo.setStatusBarVisibility(account.id, !account.showInStatusBar);
         view.refresh();
         const accountLabel = formatAccountToastLabel(updated);
-        vscode.window.showInformationMessage(
-          updated.showInStatusBar
-            ? copy.addedToStatus(accountLabel)
-            : copy.removedFromStatus(accountLabel)
+        void vscode.window.showInformationMessage(
+          updated.showInStatusBar ? copy.addedToStatus(accountLabel) : copy.removedFromStatus(accountLabel)
         );
       } catch (error) {
-        vscode.window.showWarningMessage(error instanceof Error ? error.message : String(error));
+        void vscode.window.showWarningMessage(getErrorMessage(error));
       }
     }),
     vscode.commands.registerCommand("codexAccounts.openDetails", async (item?: CodexAccountRecord) => {
@@ -148,12 +162,15 @@ export function registerCommands(
       const codexHome = getCodexHome();
       await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(path.join(codexHome, "auth.json")));
     }),
-    vscode.commands.registerCommand("codexAccounts.showQuotaSummary", async () => {
+    vscode.commands.registerCommand("codexAccounts.showQuotaSummary", () => {
       openQuotaSummaryPanel(context, repo);
     })
   );
 }
 
+/**
+ * 刷新单个账号的配额
+ */
 async function refreshSingleQuota(
   repo: AccountsRepository,
   view: { refresh(): void },
@@ -167,7 +184,7 @@ async function refreshSingleQuota(
 
   const tokens = await repo.getTokens(accountId);
   if (!tokens) {
-    throw new Error(`Tokens missing for ${account.email}`);
+    throw createError.accountNotFound(account.email);
   }
 
   const result = await refreshQuota(account, tokens);
@@ -177,25 +194,28 @@ async function refreshSingleQuota(
   if (announce) {
     const copy = getCommandCopy();
     if (result.error) {
-      vscode.window.showWarningMessage(copy.failedToRefresh(account.email, result.error.message));
+      void vscode.window.showWarningMessage(copy.failedToRefresh(account.email, result.error.message));
     } else {
-      vscode.window.showInformationMessage(copy.quotaRefreshed(account.email));
+      void vscode.window.showInformationMessage(copy.quotaRefreshed(account.email));
     }
   }
 }
 
+/**
+ * 刷新导入账号的配额
+ */
 export async function refreshImportedAccountQuota(
   repo: AccountsRepository,
   accountId: string
 ): Promise<QuotaRefreshResult> {
   const account = await repo.getAccount(accountId);
   if (!account) {
-    throw new Error(`Account not found: ${accountId}`);
+    throw createError.accountNotFound(accountId);
   }
 
   const tokens = await repo.getTokens(accountId);
   if (!tokens) {
-    throw new Error(`Tokens missing for ${account.email}`);
+    throw createError.accountNotFound(account.email);
   }
 
   const result = await refreshQuota(account, tokens);
@@ -203,13 +223,13 @@ export async function refreshImportedAccountQuota(
   return result;
 }
 
-async function pickAccount(
-  repo: AccountsRepository,
-  placeHolder: string
-) {
+/**
+ * 选择账号
+ */
+async function pickAccount(repo: AccountsRepository, placeHolder: string): Promise<CodexAccountRecord | undefined> {
   const accounts = await repo.listAccounts();
   if (!accounts.length) {
-    vscode.window.showInformationMessage(getCommandCopy().noAccounts);
+    void vscode.window.showInformationMessage(getCommandCopy().noAccounts);
     return undefined;
   }
 
@@ -225,6 +245,9 @@ async function pickAccount(
   return selected?.account;
 }
 
+/**
+ * 带进度显示地执行回调
+ */
 async function withProgress(
   title: string,
   callback: (progress: vscode.Progress<{ message?: string; increment?: number }>) => Promise<void>
@@ -239,58 +262,9 @@ async function withProgress(
   );
 }
 
-function getCommandCopy() {
-  const zh = vscode.env.language.toLowerCase().startsWith("zh");
-  return {
-    progressAddAccount: zh ? "添加 Codex 账号" : "Adding Codex account",
-    progressImportCurrent: zh ? "导入当前 auth.json" : "Importing current auth.json",
-    progressSwitch: (email: string) => (zh ? `正在切换到 ${email}` : `Switching to ${email}`),
-    progressRefreshAll: zh ? "刷新全部配额" : "Refreshing all quotas",
-    refreshingStep: (index: number, total: number, email: string) =>
-      zh ? `${index}/${total} ${email}` : `${index}/${total} ${email}`,
-    pickActivateAccount: zh ? "选择要切换到的账号" : "Select account to activate",
-    pickRefreshAccount: zh ? "选择要刷新的账号" : "Select account to refresh",
-    pickRemoveAccount: zh ? "选择要移除的账号" : "Select account to remove",
-    pickInspectAccount: zh ? "选择要查看详情的账号" : "Select account to inspect",
-    pickStatusAccount: zh ? "选择要显示在状态栏弹窗中的账号" : "Select account to show in the status popup",
-    reloadNow: zh ? "立即重载" : "Reload Now",
-    later: zh ? "稍后" : "Later",
-    remove: zh ? "删除" : "Remove",
-    activeAlwaysInStatus: zh
-      ? "当前激活账号会始终显示在状态栏弹窗顶部。"
-      : "The active account is always shown at the top of the status popup.",
-    alreadyActive: (label: string) =>
-      zh ? `当前已是 ${label}` : `${label} is already the active account`,
-    switchedAndAskReload: (email: string) =>
-      zh
-        ? `已切换当前 Codex 账号到 ${email}。是否立即重载 VS Code 以同步内置 Codex 面板？`
-        : `Active Codex account switched to ${email}. Reload VS Code now to sync the built-in Codex panel?`,
-    addedAndRefreshed: (email: string) =>
-      zh ? `已添加 Codex 账号 ${email}，并已刷新配额` : `Added Codex account ${email} and refreshed quota`,
-    addedButQuotaFailed: (email: string, message: string) =>
-      zh ? `已添加 Codex 账号 ${email}，但刷新配额失败：${message}` : `Added Codex account ${email}, but quota refresh failed: ${message}`,
-    addAccountFailed: (message: string) =>
-      zh ? `添加账号失败：${message}` : `Add account failed: ${message}`,
-    importedAndRefreshed: (email: string) =>
-      zh ? `已导入当前 auth.json 为 ${email}，并已刷新配额` : `Imported current auth.json as ${email} and refreshed quota`,
-    importedButQuotaFailed: (email: string, message: string) =>
-      zh ? `已导入当前 auth.json 为 ${email}，但刷新配额失败：${message}` : `Imported current auth.json as ${email}, but quota refresh failed: ${message}`,
-    refreshedCount: (count: number) =>
-      zh ? `已刷新 ${count} 个账号的配额` : `Refreshed quota for ${count} account(s)`,
-    confirmRemove: (email: string) =>
-      zh ? `确认移除已保存账号 ${email}？这不会删除全局 auth.json。` : `Remove saved account ${email}? This does not delete the global auth.json.`,
-    addedToStatus: (email: string) =>
-      zh ? `已将 ${email} 加入状态栏弹窗` : `Added ${email} to the status popup`,
-    removedFromStatus: (email: string) =>
-      zh ? `已将 ${email} 从状态栏弹窗移除` : `Removed ${email} from the status popup`,
-    failedToRefresh: (email: string, message: string) =>
-      zh ? `刷新 ${email} 的配额失败：${message}` : `Failed to refresh ${email}: ${message}`,
-    quotaRefreshed: (email: string) =>
-      zh ? `已刷新 ${email} 的配额` : `Quota refreshed for ${email}`,
-    noAccounts: zh ? "还没有保存 Codex 账号。" : "No Codex accounts saved yet."
-  };
-}
-
+/**
+ * 格式化账号显示标签
+ */
 function formatAccountToastLabel(account: CodexAccountRecord): string {
   const team = account.accountName?.trim();
   if (team) {
