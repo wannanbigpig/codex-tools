@@ -17,7 +17,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"    
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -155,9 +155,12 @@
     "menus": {}
   },
   "scripts": {
-    "compile": "tsc -p ./",
+    "build:webview": "vite build --config vite.webview.config.mts",
+    "typecheck:webview": "tsc --noEmit -p tsconfig.webview.json",
+    "watch:webview": "vite build --watch --config vite.webview.config.mts",
+    "compile": "npm run typecheck:webview && npm run build:webview && tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package",
+    "package": "npm run compile && vsce package",
     "lint": "eslint src --ext ts",
     "lint:fix": "eslint src --ext ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
@@ -168,9 +171,13 @@
     "@types/vscode": "^1.96.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/vsce": "^3.2.1",
     "eslint": "^8.57.0",
     "prettier": "^3.2.5",
     "typescript": "^5.7.2",
-    "@vscode/vsce": "^3.2.1"
+    "vite": "^6.4.1"
+  },
+  "dependencies": {
+    "preact": "^10.29.0"
   }
 }
