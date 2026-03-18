@@ -14,9 +14,9 @@ VS Code extension for managing multiple Codex accounts, viewing quota usage, and
 
 Manage multiple Codex accounts inside VS Code, inspect quota usage, switch the active global account, and monitor key quota data from the status bar.
 
-**Features:** quota dashboard, multi-account management, OAuth sign-in, first-run local account detection and binding, immediate quota refresh after import, cross-window account sync, Codex App auto-restart, status bar monitoring, details panel, bilingual UI, and extension-level language override.
+**Features:** quota dashboard, multi-account management, OAuth sign-in, first-run local account detection and binding, immediate quota refresh after import, cross-window account sync, Codex App auto-restart, status bar monitoring, details panel, multilingual UI, and extension-level language override.
 
-**Language:** follows the current VS Code display language. Currently supports Simplified Chinese and English.
+**Language:** follows the current VS Code display language. Primary support is for Simplified Chinese and English, with additional localization for other languages.
 
 ---
 
@@ -81,12 +81,12 @@ Each account can show:
 - Pin selected accounts from the dashboard into status visibility
 - Click the status bar entry to open the full quota dashboard
 
-### Bilingual UI
+### Multilingual UI
 
 - Automatically follows the current VS Code display language
-- Supports Simplified Chinese and English
+- Primary support for Simplified Chinese and English, with additional localization for other languages
 - Dashboard copy, prompts, and interaction text switch with the editor language
-- You can also force this extension to use Simplified Chinese or English without changing the rest of VS Code
+- You can also force this extension to use Simplified Chinese, English, or another supported language without changing the rest of VS Code
 
 ### Details Panel
 
@@ -104,7 +104,7 @@ Open a per-account details panel to inspect:
 You can change these directly from the settings button in the top-right corner of the dashboard, or from VS Code Settings by searching for `codexAccounts`.
 
 - `Language`
-  - `Auto (follow VS Code)`, `Simplified Chinese`, `English`
+  - `Auto (follow VS Code)`, `Simplified Chinese`, `English`, and other supported languages
   - Only affects codex-tools dashboard copy and prompt text
 - `Codex App Restart Policy`
   - Disabled by default
@@ -160,9 +160,19 @@ Available commands in the VS Code Command Palette:
 
 ## Installation
 
-The extension is not yet available on the VS Code Marketplace. For now, install it manually from a `.vsix` package.
+The extension is now available on the VS Code Marketplace, and you can still install it from a `.vsix` package or run it from source.
 
-### Option 1: Install from VSIX
+### Option 1: Install from the Marketplace
+
+1. Open the Extensions view in VS Code
+2. Search for `Codex Accounts Manager`
+3. Find the extension published by `wannanbigpig` and click Install
+
+You can also open the Marketplace page directly:
+
+[Codex Accounts Manager - Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=wannanbigpig.codex-accounts-manager)
+
+### Option 2: Install from VSIX
 
 1. Download the released `.vsix` file
 2. Open the Command Palette in VS Code
@@ -175,7 +185,7 @@ Or install from the command line:
 code --install-extension codex-accounts-manager-x.y.z.vsix
 ```
 
-### Option 2: Run from Source
+### Option 3: Run from Source
 
 ```bash
 git clone https://github.com/wannanbigpig/codex-tools.git
