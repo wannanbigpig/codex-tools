@@ -30,6 +30,26 @@ body {
   letter-spacing: 0.01em;
   font-size: 15px;
 }
+.header-title-with-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.header-count-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.24);
+  color: #d9c3ff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
 .header-sub {
   color: var(--muted);
   font-size: 12px;

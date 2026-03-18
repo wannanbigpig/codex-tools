@@ -2,6 +2,7 @@ import { CodexDailyUsageBreakdown, CodexDailyUsagePoint, CodexTokens } from "../
 import { APIError } from "../core/errors";
 import { extractClaims } from "../utils/jwt";
 import { logNetworkEvent } from "../utils/debug";
+import { fetchWithTimeout } from "../utils/network";
 
 const DAILY_USAGE_BREAKDOWN_URL = "https://chatgpt.com/backend-api/wham/usage/daily-token-usage-breakdown";
 
@@ -25,10 +26,15 @@ export async function fetchDailyUsageBreakdown(
   const url = new URL(DAILY_USAGE_BREAKDOWN_URL);
   url.searchParams.set("days", String(days));
 
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers
-  });
+  const response = await fetchWithTimeout(
+    url.toString(),
+    {
+      method: "GET",
+      headers
+    },
+    15000,
+    "Daily usage request"
+  );
 
   const raw = await response.text();
   logNetworkEvent("daily-usage", {

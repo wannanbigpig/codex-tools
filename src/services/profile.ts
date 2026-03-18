@@ -11,6 +11,7 @@
 
 import { CodexTokens } from "../core/types";
 import { extractClaims } from "../utils/jwt";
+import { fetchWithTimeout } from "../utils/network";
 import { APIError } from "../core/errors";
 import { logNetworkEvent } from "../utils/debug";
 
@@ -43,38 +44,98 @@ export async function fetchRemoteAccountProfile(tokens: CodexTokens): Promise<Re
   const ACCOUNT_CHECK_URL = "https://chatgpt.com/backend-api/wham/accounts/check";
 
   const claims = extractClaims(tokens.idToken, tokens.accessToken);
+  const accountId = tokens.accountId ?? claims.accountId;
+  const primary = await requestAccountProfile(ACCOUNT_CHECK_URL, tokens.accessToken, accountId);
+  const shouldRetry =
+    accountId &&
+    (!primary.ok ? shouldRetryWithoutWorkspace(primary.status, primary.raw) : !parseAccountProfile(primary.payload, claims.accountId, claims.organizationId));
+
+  if (shouldRetry) {
+    logNetworkEvent("profile.retry-without-workspace", {
+      accountId,
+      reason: primary.ok ? "profile_not_matched" : `status_${primary.status}`
+    });
+    const fallback = await requestAccountProfile(ACCOUNT_CHECK_URL, tokens.accessToken);
+    if (fallback.ok) {
+      const fallbackProfile = parseAccountProfile(fallback.payload, claims.accountId, claims.organizationId);
+      if (fallbackProfile) {
+        return fallbackProfile;
+      }
+    }
+  }
+
+  if (!primary.ok) {
+    throw new APIError(`Account profile API returned ${primary.status}: ${primary.raw.slice(0, 200)}`, {
+      statusCode: primary.status,
+      responseBody: primary.raw.slice(0, 200)
+    });
+  }
+
+  return parseAccountProfile(primary.payload, claims.accountId, claims.organizationId);
+}
+
+async function requestAccountProfile(url: string, accessToken: string, accountId?: string): Promise<{
+  ok: boolean;
+  status: number;
+  raw: string;
+  payload: Record<string, unknown>;
+}> {
   const headers = new Headers({
-    Authorization: `Bearer ${tokens.accessToken}`,
+    Authorization: `Bearer ${accessToken}`,
     Accept: "application/json"
   });
 
-  const accountId = tokens.accountId ?? claims.accountId;
   if (accountId) {
     headers.set("ChatGPT-Account-Id", accountId);
   }
 
-  const response = await fetch(ACCOUNT_CHECK_URL, {
-    method: "GET",
-    headers
-  });
+  const response = await fetchWithTimeout(
+    url,
+    {
+      method: "GET",
+      headers
+    },
+    8000,
+    "Account profile request"
+  );
 
   const raw = await response.text();
   logNetworkEvent("profile", {
     accountId,
     status: response.status,
     ok: response.ok,
-    url: ACCOUNT_CHECK_URL,
+    url,
     bodyPreview: raw.slice(0, 1000)
   });
-  if (!response.ok) {
-    throw new APIError(`Account profile API returned ${response.status}: ${raw.slice(0, 200)}`, {
-      statusCode: response.status,
-      responseBody: raw.slice(0, 200)
-    });
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    raw,
+    payload: parseProfilePayload(raw)
+  };
+}
+
+function parseProfilePayload(raw: string): Record<string, unknown> {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function shouldRetryWithoutWorkspace(status: number, raw: string): boolean {
+  if (![400, 401, 402, 403, 404, 409].includes(status)) {
+    return false;
   }
 
-  const payload = JSON.parse(raw) as Record<string, unknown>;
-  return parseAccountProfile(payload, claims.accountId, claims.organizationId);
+  const normalized = raw.toLowerCase();
+  return (
+    normalized.includes("workspace") ||
+    normalized.includes("account") ||
+    normalized.includes("deactivated_workspace") ||
+    normalized.includes("no active workspace")
+  );
 }
 
 /**

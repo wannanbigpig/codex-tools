@@ -3,6 +3,8 @@ import * as http from "http";
 import * as vscode from "vscode";
 import { CodexTokens } from "../core/types";
 import { isTokenExpired } from "../utils/jwt";
+import { fetchWithTimeout } from "../utils/network";
+import { logNetworkEvent } from "../utils/debug";
 import { AuthError, ErrorCode, APIError } from "../core/errors";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -26,6 +28,15 @@ export async function loginWithOAuth(): Promise<CodexTokens> {
   const challenge = sha256Base64Url(verifier);
   const state = randomBase64Url();
   const redirectUri = `http://localhost:${port}/auth/callback`;
+  const session = available
+    ? {
+        state,
+        verifier,
+        server: http.createServer(),
+        redirectUri
+      }
+    : undefined;
+  const codePromise = session ? waitForCode(session) : undefined;
 
   const authUrl =
     `${AUTH_ENDPOINT}?response_type=code&client_id=${encodeURIComponent(CLIENT_ID)}` +
@@ -36,8 +47,15 @@ export async function loginWithOAuth(): Promise<CodexTokens> {
     `&codex_cli_simplified_flow=true&state=${encodeURIComponent(state)}` +
     `&originator=${encodeURIComponent(ORIGINATOR)}`;
 
+  logNetworkEvent("oauth.start", {
+    callbackPort: port,
+    callbackAvailable: available,
+    redirectUri
+  });
+
   const opened = await vscode.env.openExternal(vscode.Uri.parse(authUrl));
   if (!opened) {
+    session?.server.close();
     void vscode.env.clipboard.writeText(authUrl);
     throw new AuthError("Unable to open the browser automatically. The authorization URL was copied to your clipboard.", {
       code: ErrorCode.AUTH_OAUTH_FAILED
@@ -45,22 +63,23 @@ export async function loginWithOAuth(): Promise<CodexTokens> {
   }
 
   if (!available) {
+    logNetworkEvent("oauth.manual-callback", {
+      reason: "port_unavailable",
+      redirectUri
+    });
     const code = await promptForManualCallback(authUrl, redirectUri, state);
     return exchangeCodeForTokens(code, verifier, redirectUri);
   }
 
-  const codePromise = waitForCode({
-    state,
-    verifier,
-    server: http.createServer(),
-    redirectUri
-  });
-
   let code: string;
   try {
-    code = await codePromise;
+    code = await codePromise!;
   } catch (error) {
     if (error instanceof Error && error.message.includes("timed out")) {
+      logNetworkEvent("oauth.manual-callback", {
+        reason: "callback_timeout",
+        redirectUri
+      });
       code = await promptForManualCallback(authUrl, redirectUri, state);
     } else {
       throw error;
@@ -71,19 +90,30 @@ export async function loginWithOAuth(): Promise<CodexTokens> {
 }
 
 export async function refreshTokens(refreshToken: string): Promise<CodexTokens> {
-  const response = await fetch(TOKEN_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
+  const response = await fetchWithTimeout(
+    TOKEN_ENDPOINT,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: CLIENT_ID
+      }).toString()
     },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: CLIENT_ID
-    }).toString()
-  });
+    15000,
+    "Token refresh"
+  );
 
   const raw = await response.text();
+  logNetworkEvent("oauth.refresh", {
+    ok: response.ok,
+    status: response.status,
+    hasRefreshToken: Boolean(refreshToken),
+    bodyPreview: raw.slice(0, 400)
+  });
   if (!response.ok) {
     throw new APIError(`Token refresh failed: ${raw}`, {
       statusCode: response.status,
@@ -138,6 +168,11 @@ async function waitForCode(session: OAuthSession): Promise<string> {
 
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(successHtml());
+      logNetworkEvent("oauth.callback", {
+        ok: true,
+        path: url.pathname,
+        hasCode: true
+      });
       clearTimeout(timeout);
       session.server.close();
       resolve(code);
@@ -153,21 +188,32 @@ async function waitForCode(session: OAuthSession): Promise<string> {
 }
 
 async function exchangeCodeForTokens(code: string, verifier: string, redirectUri: string): Promise<CodexTokens> {
-  const response = await fetch(TOKEN_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
+  const response = await fetchWithTimeout(
+    TOKEN_ENDPOINT,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: redirectUri,
+        client_id: CLIENT_ID,
+        code_verifier: verifier
+      }).toString()
     },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: redirectUri,
-      client_id: CLIENT_ID,
-      code_verifier: verifier
-    }).toString()
-  });
+    15000,
+    "OAuth token exchange"
+  );
 
   const raw = await response.text();
+  logNetworkEvent("oauth.exchange", {
+    ok: response.ok,
+    status: response.status,
+    redirectUri,
+    bodyPreview: raw.slice(0, 400)
+  });
   if (!response.ok) {
     throw new APIError(`Token exchange failed: ${raw}`, {
       statusCode: response.status,

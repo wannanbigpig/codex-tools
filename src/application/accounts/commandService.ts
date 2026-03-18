@@ -5,7 +5,13 @@ import { getCodexHome } from "../../codex";
 import { getErrorMessage } from "../../core";
 import { CodexAccountRecord } from "../../core/types";
 import { AccountsRepository } from "../../storage";
-import { getCodexAppRestartCopy, getCodexAppState, getCommandCopy, restartCodexAppIfInstalled } from "../../utils";
+import {
+  getCodexAppRestartCopy,
+  getCodexAppState,
+  getCommandCopy,
+  logNetworkEvent,
+  restartCodexAppIfInstalled
+} from "../../utils";
 import { openDetailsPanel } from "../../ui";
 import { openQuotaSummaryPanel } from "../../ui/quotaSummary";
 import {
@@ -31,11 +37,32 @@ export class AccountsCommandService {
   async addAccount(): Promise<void> {
     const copy = getCommandCopy();
     try {
+      logNetworkEvent("account.add", { step: "started" });
       await this.withProgress(copy.progressAddAccount, async () => {
         const tokens = await loginWithOAuth();
+        logNetworkEvent("account.add", {
+          step: "oauth-complete",
+          hasRefreshToken: Boolean(tokens.refreshToken),
+          accountId: tokens.accountId
+        });
         const account = await this.repo.upsertFromTokens(tokens, false);
+        logNetworkEvent("account.add", {
+          step: "account-upserted",
+          storedAccountId: account.accountId,
+          organizationId: account.organizationId,
+          email: account.email,
+          planType: account.planType,
+          accountName: account.accountName,
+          accountStructure: account.accountStructure
+        });
         const result = await refreshImportedAccountQuota(this.repo, account.id);
         this.view.refresh();
+        logNetworkEvent("account.add", {
+          step: "initial-refresh-finished",
+          accountId: account.id,
+          quotaOk: !result.error,
+          quotaError: result.error?.message
+        });
 
         if (result.error) {
           void vscode.window.showWarningMessage(copy.addedButQuotaFailed(account.email, result.error.message));
@@ -44,6 +71,10 @@ export class AccountsCommandService {
         }
       });
     } catch (error) {
+      logNetworkEvent("account.add", {
+        step: "failed",
+        message: getErrorMessage(error)
+      });
       void vscode.window.showErrorMessage(copy.addAccountFailed(getErrorMessage(error)));
     }
   }

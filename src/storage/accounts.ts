@@ -164,6 +164,10 @@ export class AccountsRepository {
     const id = buildAccountStorageId(claims.email, claims.accountId, claims.organizationId);
     const existing = index.accounts.find((item) => item.id === id);
     const now = Date.now();
+    const resolvedAccountName =
+      sanitizeWorkspaceName(remoteProfile?.accountName, claims.planType) ??
+      pickWorkspaceLikeTitle(claims.organizations?.map((item) => item.title), claims.planType) ??
+      sanitizeWorkspaceName(existing?.accountName, claims.planType);
 
     const account: CodexAccountRecord = {
       id,
@@ -174,10 +178,7 @@ export class AccountsRepository {
       planType: claims.planType,
       accountId: remoteProfile?.accountId ?? claims.accountId ?? tokens.accountId,
       organizationId: claims.organizationId,
-      accountName:
-        remoteProfile?.accountName ??
-        pickWorkspaceLikeTitle(claims.organizations?.map((item) => item.title)) ??
-        existing?.accountName,
+      accountName: resolvedAccountName,
       accountStructure:
         remoteProfile?.accountStructure ??
         inferAccountStructure(claims.planType, claims.organizationId) ??
@@ -520,7 +521,7 @@ export class AccountsRepository {
 /**
  * 选择工作空间样式的标题
  */
-function pickWorkspaceLikeTitle(candidates?: Array<string | undefined>): string | undefined {
+function pickWorkspaceLikeTitle(candidates?: Array<string | undefined>, planType?: string): string | undefined {
   if (!candidates?.length) {
     return undefined;
   }
@@ -529,7 +530,13 @@ function pickWorkspaceLikeTitle(candidates?: Array<string | undefined>): string 
     .filter((item): item is string => Boolean(item?.trim()))
     .map((item) => item.trim());
 
-  return normalized.find((item) => item.toLowerCase() !== "personal") ?? normalized[0];
+  const preferred = normalized.find((item) => !isGenericPersonalWorkspaceName(item));
+  if (preferred) {
+    return preferred;
+  }
+
+  const fallback = normalized[0];
+  return sanitizeWorkspaceName(fallback, planType);
 }
 
 /**
@@ -539,10 +546,37 @@ function inferAccountStructure(planType?: string, organizationId?: string): stri
   if (organizationId) {
     return "organization";
   }
-  if (planType && planType.toLowerCase() === "team") {
+  if (planType && ["team", "business", "enterprise"].includes(planType.toLowerCase())) {
     return "team";
   }
   return "personal";
+}
+
+function sanitizeWorkspaceName(name: string | undefined, planType?: string): string | undefined {
+  const trimmed = name?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (isGenericPersonalWorkspaceName(trimmed) && !isPersonalLikePlan(planType)) {
+    return undefined;
+  }
+
+  return trimmed;
+}
+
+function isGenericPersonalWorkspaceName(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "personal" || normalized === "personal workspace" || normalized === "个人空间";
+}
+
+function isPersonalLikePlan(planType?: string): boolean {
+  const normalized = planType?.trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+
+  return ["free", "plus", "pro", "personal"].includes(normalized);
 }
 
 /**

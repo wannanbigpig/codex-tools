@@ -347,8 +347,9 @@ function App() {
           <section class="section">
             <div class="header" style={{ marginBottom: "12px" }}>
               <div>
-                <div class="header-title" style={{ fontSize: "14px" }}>
+                <div class="header-title header-title-with-meta" style={{ fontSize: "14px" }}>
                   {snapshot.copy.savedAccounts}
+                  <span class="header-count-badge">{formatSavedAccountsSummary(snapshot.lang, snapshot.accounts.length)}</span>
                 </div>
                 <div class="header-sub">{snapshot.copy.savedAccountsSub}</div>
               </div>
@@ -1286,6 +1287,19 @@ function formatTemplate(template: string, value: number | Record<string, string 
     (result, [key, item]) => result.replace(new RegExp(`\\{${key}\\}`, "g"), String(item)),
     template
   );
+}
+
+function formatSavedAccountsSummary(lang: DashboardState["lang"], count: number): string {
+  switch (lang) {
+    case "zh":
+      return `现有 ${count} 个账号`;
+    case "zh-hant":
+      return `現有 ${count} 個帳號`;
+    case "ja":
+      return `保存中 ${count} 件`;
+    default:
+      return `${count} account${count === 1 ? "" : "s"} in list`;
+  }
 }
 
 function normalizeThresholds(green: number, yellow: number): { green: number; yellow: number } {

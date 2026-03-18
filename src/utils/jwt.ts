@@ -76,11 +76,15 @@ export function extractClaims(idToken: string, accessToken?: string): DecodedAut
     accountId:
       readString(idAuth, "chatgpt_account_id") ??
       readString(idAuth, "account_id") ??
-      (accessAuth ? readString(accessAuth, "chatgpt_account_id") : undefined),
+      (accessAuth ? readString(accessAuth, "chatgpt_account_id") : undefined) ??
+      (accessAuth ? readString(accessAuth, "account_id") : undefined),
     organizationId:
       readString(idAuth, "organization_id") ??
       readString(idAuth, "chatgpt_organization_id") ??
-      readString(idAuth, "org_id"),
+      readString(idAuth, "org_id") ??
+      (accessAuth ? readString(accessAuth, "organization_id") : undefined) ??
+      (accessAuth ? readString(accessAuth, "chatgpt_organization_id") : undefined) ??
+      (accessAuth ? readString(accessAuth, "org_id") : undefined),
     organizations,
     loginAt: readLoginEpochMs(idPayload, accessPayload)
   };

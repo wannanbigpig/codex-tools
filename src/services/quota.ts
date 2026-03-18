@@ -12,6 +12,7 @@ import { CodexAccountRecord, CodexQuotaErrorInfo, CodexQuotaSummary, CodexTokens
 import { needsRefresh, refreshTokens } from "../auth/oauth";
 import { extractClaims } from "../utils/jwt";
 import { logNetworkEvent } from "../utils/debug";
+import { fetchWithTimeout } from "../utils/network";
 
 /** 配额缓存失效时间 (毫秒) - 避免短时间内重复刷新 */
 const QUOTA_CACHE_TTL_MS = 30000; // 30 秒
@@ -79,33 +80,23 @@ export async function refreshQuota(
     }
 
     const accountId = account.accountId ?? extractClaims(effectiveTokens.idToken, effectiveTokens.accessToken).accountId;
+    const primary = await requestQuotaUsage(effectiveTokens.accessToken, accountId);
+    const usageResult =
+      accountId && !primary.ok && shouldRetryWithoutWorkspace(primary.status, primary.raw)
+        ? await (async () => {
+            logNetworkEvent("quota.retry-without-workspace", {
+              accountId,
+              status: primary.status
+            });
+            return requestQuotaUsage(effectiveTokens.accessToken);
+          })()
+        : primary;
 
-    const headers = new Headers({
-      Authorization: `Bearer ${effectiveTokens.accessToken}`,
-      Accept: "application/json"
-    });
-    if (accountId) {
-      headers.set("ChatGPT-Account-Id", accountId);
+    if (!usageResult.ok) {
+      return { error: buildError(extractErrorMessage(usageResult.status, usageResult.raw)), updatedTokens: effectiveTokens };
     }
 
-    const response = await fetch(QUOTA_USAGE_URL, {
-      method: "GET",
-      headers
-    });
-
-    const raw = await response.text();
-    logNetworkEvent("quota", {
-      accountId,
-      status: response.status,
-      ok: response.ok,
-      url: QUOTA_USAGE_URL,
-      bodyPreview: raw.slice(0, 1000)
-    });
-    if (!response.ok) {
-      return { error: buildError(extractErrorMessage(response.status, raw)), updatedTokens: effectiveTokens };
-    }
-
-    const usage = JSON.parse(raw) as CodexUsageResponse;
+    const usage = usageResult.payload;
     const quotaSummary = parseUsage(usage);
 
     quotaCache.set(account.id, {
@@ -127,6 +118,55 @@ export async function refreshQuota(
     if (inflightQuotaRefreshes.get(account.id) === refreshTask) {
       inflightQuotaRefreshes.delete(account.id);
     }
+  }
+}
+
+async function requestQuotaUsage(accessToken: string, accountId?: string): Promise<{
+  ok: boolean;
+  status: number;
+  raw: string;
+  payload: CodexUsageResponse;
+}> {
+  const headers = new Headers({
+    Authorization: `Bearer ${accessToken}`,
+    Accept: "application/json"
+  });
+  if (accountId) {
+    headers.set("ChatGPT-Account-Id", accountId);
+  }
+
+  const response = await fetchWithTimeout(
+    QUOTA_USAGE_URL,
+    {
+      method: "GET",
+      headers
+    },
+    15000,
+    "Quota request"
+  );
+
+  const raw = await response.text();
+  logNetworkEvent("quota", {
+    accountId,
+    status: response.status,
+    ok: response.ok,
+    url: QUOTA_USAGE_URL,
+    bodyPreview: raw.slice(0, 1000)
+  });
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    raw,
+    payload: parseUsagePayload(raw)
+  };
+}
+
+function parseUsagePayload(raw: string): CodexUsageResponse {
+  try {
+    return JSON.parse(raw) as CodexUsageResponse;
+  } catch {
+    return {};
   }
 }
 
@@ -200,6 +240,20 @@ function extractErrorMessage(status: number, raw: string): string {
   } catch {
     return `API returned ${status} - ${raw.slice(0, 200)}`;
   }
+}
+
+function shouldRetryWithoutWorkspace(status: number, raw: string): boolean {
+  if (![400, 401, 402, 403, 404, 409].includes(status)) {
+    return false;
+  }
+
+  const normalized = raw.toLowerCase();
+  return (
+    normalized.includes("workspace") ||
+    normalized.includes("account") ||
+    normalized.includes("deactivated_workspace") ||
+    normalized.includes("no active workspace")
+  );
 }
 
 /**
