@@ -1,0 +1,4 @@
+{
+  "extends": "../tsconfig.webview.json",
+  "include": ["./**/*.ts", "./**/*.tsx", "../src/domain/dashboard/**/*.ts", "../src/localization/**/*.ts"]
+}

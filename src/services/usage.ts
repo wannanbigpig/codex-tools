@@ -64,8 +64,7 @@ function parseDailyUsageBreakdown(payload: unknown, fallbackDays: number): Codex
 
   return {
     days,
-    points,
-    rawData: payload
+    points
   };
 }
 
@@ -124,8 +123,7 @@ function parseUsagePoint(value: UnknownRecord): CodexDailyUsagePoint | undefined
     surfaceValues,
     inputTokens: readNumber(value, ["input_tokens", "prompt_tokens", "input", "prompt_token_count"]),
     outputTokens: readNumber(value, ["output_tokens", "completion_tokens", "output", "completion_token_count"]),
-    cachedTokens: readNumber(value, ["cached_tokens", "cache_tokens", "cached"]),
-    rawData: value
+    cachedTokens: readNumber(value, ["cached_tokens", "cache_tokens", "cached"])
   };
 }
 

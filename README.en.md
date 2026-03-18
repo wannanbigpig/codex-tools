@@ -20,11 +20,19 @@ Manage multiple Codex accounts inside VS Code, inspect quota usage, switch the a
 
 ---
 
+## Preview
+
+| Quota Dashboard | Details Panel |
+| --- | --- |
+| <img src="https://raw.githubusercontent.com/wannanbigpig/codex-tools/master/media/dashboard.png" alt="Codex Tools quota dashboard" width="420" /> | <img src="https://raw.githubusercontent.com/wannanbigpig/codex-tools/master/media/detail.png" alt="Codex Tools details panel" width="420" /> |
+| Settings Panel | Status Bar |
+| <img src="https://raw.githubusercontent.com/wannanbigpig/codex-tools/master/media/setting.png" alt="Codex Tools settings panel" width="260" /> | <img src="https://raw.githubusercontent.com/wannanbigpig/codex-tools/master/media/status_bar.png" alt="Codex Tools status bar" width="220" /> |
+
+---
+
 ## Overview
 
 ### Quota Dashboard
-
-![Codex Tools quota dashboard](https://raw.githubusercontent.com/wannanbigpig/codex-tools/master/media/image.png)
 
 The extension provides a Webview dashboard for managing and monitoring all saved Codex accounts in one place:
 
@@ -99,12 +107,18 @@ You can change these directly from the settings button in the top-right corner o
   - `Auto (follow VS Code)`, `Simplified Chinese`, `English`
   - Only affects codex-tools dashboard copy and prompt text
 - `Codex App Restart Policy`
+  - Disabled by default
+  - When enabled, choose:
   - `Restart automatically`: restart Codex App on account switch if it is already running
   - `Ask every time`: let you confirm each restart manually
 - `Automatic Quota Refresh`
   - Can be disabled, or set to `5 / 10 / 15 / 30 / 60` minutes
-  - Defaults to `15` minutes
+  - Disabled by default
   - When disabled, no timed refresh runs
+- `Automatic Account Switching`
+  - Disabled by default
+  - When enabled, set separate thresholds for `5-hour` and `weekly` quota
+  - After refresh, the extension can switch to another saved account when the active one hits a threshold
 - `Codex App Launch Path`
   - Optional custom desktop app path
   - Leave empty to use auto-detection
@@ -112,7 +126,8 @@ You can change these directly from the settings button in the top-right corner o
   - Choose whether to show the `Code Review` quota
 - `Quota Warning`
   - Enable or disable low-quota alerts
-  - When enabled, choose a threshold of `10 / 20 / 30 / 40 / 50%`
+  - Disabled by default
+  - When enabled, choose a threshold from `5%` to `90%`
   - After refresh, the extension shows a localized warning when the active account drops below the configured threshold
 
 ---
@@ -196,6 +211,16 @@ npx @vscode/vsce package
 
 - ⭐ [GitHub Star](https://github.com/wannanbigpig/codex-tools)
 - 💬 [Report Issues](https://github.com/wannanbigpig/codex-tools/issues)
+
+---
+
+## 💝 Support The Project
+
+Thanks for using `codex-tools`.
+
+If this project helps you, you can support its ongoing development and maintenance.
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange?style=for-the-badge&logo=buy-me-a-coffee)](https://github.com/wannanbigpig/codex-tools/blob/master/docs/DONATE.en.md)
 
 ---
 

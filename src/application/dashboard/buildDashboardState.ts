@@ -3,6 +3,7 @@ import { AccountsRepository } from "../../storage";
 import { ExtensionSettingsStore } from "../../infrastructure/config/extensionSettings";
 import { formatAccountStructure, formatAuthProvider, formatPlanType, getDashboardCopy } from "./copy";
 import { CodexAccountRecord } from "../../core/types";
+import { resolveCodexAppLaunchPath } from "../../utils/codexApp";
 
 export async function buildDashboardState(
   repo: AccountsRepository,
@@ -10,7 +11,11 @@ export async function buildDashboardState(
   logoUri: string
 ): Promise<DashboardState> {
   const lang = settingsStore.resolveLanguage();
-  const settings = settingsStore.getDashboardSettings();
+  const baseSettings = settingsStore.getDashboardSettings();
+  const settings = {
+    ...baseSettings,
+    resolvedCodexAppPath: (await resolveCodexAppLaunchPath(baseSettings.codexAppPath)) ?? ""
+  };
   const copy = getDashboardCopy(lang);
   const sortedAccounts = [...(await repo.listAccounts())].sort(
     (a, b) => Number(b.isActive) - Number(a.isActive) || a.email.localeCompare(b.email)
@@ -39,7 +44,7 @@ function mapAccount(
 
   return {
     id: account.id,
-    displayName: account.displayName?.trim() ?? account.accountName?.trim() ?? account.email,
+    displayName: account.accountName?.trim() ?? account.email,
     email: account.email,
     accountName: account.accountName,
     authProviderLabel: formatAuthProvider(account.authProvider, lang),

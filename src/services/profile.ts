@@ -17,7 +17,7 @@ import { logNetworkEvent } from "../utils/debug";
 /**
  * 远程账号档案信息
  */
-export interface RemoteAccountProfile {
+interface RemoteAccountProfile {
   /** 账号名称 */
   accountName?: string;
   /** 账号结构类型 */

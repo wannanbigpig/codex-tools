@@ -35,6 +35,53 @@ body {
   display: grid;
   gap: 6px;
 }
+.hero-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.hero-title-row h1 {
+  min-width: 0;
+}
+.privacy-toggle {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(232, 236, 255, 0.78);
+  flex: none;
+  opacity: 0.88;
+}
+.privacy-toggle:hover {
+  color: var(--text);
+  background: rgba(255,255,255,0.06);
+  transform: translateY(-1px);
+}
+.privacy-toggle svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+.privacy-icon-hide {
+  display: none;
+}
+body.privacy-hidden .privacy-toggle {
+  color: #c7ffe4;
+  background: rgba(52,211,153,0.10);
+}
+body.privacy-hidden .privacy-icon-show {
+  display: none;
+}
+body.privacy-hidden .privacy-icon-hide {
+  display: inline-flex;
+}
 h1 {
   margin: 0;
   font-size: 24px;
@@ -50,6 +97,15 @@ h2 {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.6;
+}
+.privacy-sensitive-masked {
+  display: none;
+}
+body.privacy-hidden .privacy-sensitive-raw {
+  display: none;
+}
+body.privacy-hidden .privacy-sensitive-masked {
+  display: inline;
 }
 .summary {
   display: grid;
@@ -286,6 +342,7 @@ h2 {
   .meta-card,
   .usage-card { padding: 14px; }
   .hero-top { flex-direction: column; }
+  .hero-title-row { width: 100%; }
   .badges { justify-content: flex-start; }
   h1 { font-size: 20px; }
   .usage-bars { gap: 4px; grid-auto-columns: minmax(8px, 1fr); }

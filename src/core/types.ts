@@ -51,8 +51,6 @@ export interface CodexQuotaSummary {
   codeReviewWindowMinutes?: number;
   /** 是否存在代码审查配额窗口 */
   codeReviewWindowPresent?: boolean;
-  /** 原始 API 响应数据 (用于调试) */
-  rawData?: unknown;
 }
 
 /**
@@ -73,10 +71,6 @@ export interface CodexQuotaErrorInfo {
 export interface CodexAccountRecord {
   /** 内部存储 ID */
   id: string;
-  /** 用户显示名 */
-  displayName?: string;
-  /** 用户头像 URL */
-  avatarUrl?: string;
   /** 登录时间戳 (毫秒) */
   loginAt?: number;
   /** 用户邮箱 */
@@ -225,8 +219,6 @@ export interface CodexDailyUsagePoint {
   outputTokens?: number;
   /** 缓存 token 数 */
   cachedTokens?: number;
-  /** 原始条目 */
-  rawData?: unknown;
 }
 
 /**
@@ -237,26 +229,4 @@ export interface CodexDailyUsageBreakdown {
   days: number;
   /** 明细点 */
   points: CodexDailyUsagePoint[];
-  /** 原始 API 数据 */
-  rawData?: unknown;
 }
-
-/**
- * 辅助类型：可选属性的默认值
- */
-export type WithDefaults<T, RequiredFields extends keyof T> = Required<Pick<T, RequiredFields>> &
-  Omit<T, RequiredFields>;
-
-/**
- * 辅助类型：只读深拷贝
- */
-export type ReadonlyDeep<T> = {
-  readonly [K in keyof T]: T[K] extends object ? ReadonlyDeep<T[K]> : T[K];
-};
-
-/**
- * 辅助类型：部分深拷贝
- */
-export type PartialDeep<T> = {
-  [K in keyof T]?: T[K] extends object ? PartialDeep<T[K]> : T[K];
-};

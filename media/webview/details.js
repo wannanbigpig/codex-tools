@@ -1,5 +1,23 @@
 (function () {
   const lang = document.documentElement.lang;
+  const privacyButton = document.querySelector("[data-role='privacy-toggle']");
+
+  function applyPrivacyMode(hidden) {
+    document.body.classList.toggle("privacy-hidden", hidden);
+
+    if (!privacyButton) {
+      return;
+    }
+
+    const nextLabel = hidden ? privacyButton.dataset.showLabel : privacyButton.dataset.hideLabel;
+    if (!nextLabel) {
+      return;
+    }
+
+    privacyButton.setAttribute("aria-pressed", String(hidden));
+    privacyButton.setAttribute("aria-label", nextLabel);
+    privacyButton.setAttribute("title", nextLabel);
+  }
 
   function formatRelativeTime(epochSeconds) {
     if (!epochSeconds) {
@@ -44,5 +62,14 @@
   }
 
   updateLiveTimes();
+  applyPrivacyMode(false);
+
+  if (privacyButton) {
+    privacyButton.addEventListener("click", () => {
+      const hidden = !document.body.classList.contains("privacy-hidden");
+      applyPrivacyMode(hidden);
+    });
+  }
+
   setInterval(updateLiveTimes, 60000);
 })();

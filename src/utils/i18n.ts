@@ -15,11 +15,14 @@
  */
 
 import * as vscode from "vscode";
+import type { DashboardLanguage } from "../localization/languages";
+import { resolveDashboardLanguage } from "../localization/languages";
+import { messageResources } from "../localization/resources/messages";
 
 /**
  * 支持的语言
  */
-export type SupportedLanguage = "zh" | "en";
+export type SupportedLanguage = DashboardLanguage;
 
 /**
  * 翻译键类型 - 确保类型安全
@@ -142,6 +145,7 @@ export type TranslationKey =
   | "quotaWarning.reviewLabel"
   | "quotaWarning.message"
   | "quotaWarning.dismiss"
+  | "quotaWarning.switchNow"
   // Status Toggle
   | "statusToggle.alwaysShown"
   | "statusToggle.added"
@@ -156,295 +160,14 @@ export type TranslationParams = Record<string, string | number | boolean>;
 /**
  * 翻译数据结构
  */
-interface TranslationData {
-  /** 中文翻译 */
-  zh: Record<TranslationKey, string>;
-  /** 英文翻译 */
-  en: Record<TranslationKey, string>;
-}
+type TranslationData = Record<SupportedLanguage, Record<TranslationKey, string>>;
 
 /**
  * 翻译定义
  *
  * 按功能模块组织翻译字符串
  */
-const translations: TranslationData = {
-  zh: {
-    // 通用
-    "common.loading": "加载中...",
-    "common.success": "成功",
-    "common.error": "错误",
-    "common.cancel": "取消",
-    "common.confirm": "确认",
-    "common.retry": "重试",
-    "common.unknown": "未知",
-    "common.never": "从未",
-
-    // 账号相关
-    "account.current": "当前",
-    "account.saved": "已保存",
-    "account.active": "激活",
-    "account.switch": "切换",
-    "account.add": "添加账号",
-    "account.remove": "移除账号",
-    "account.import": "导入当前账号",
-    "account.refresh": "刷新配额",
-    "account.details": "查看详情",
-    "account.teamName": "团队空间",
-    "account.login": "登录方式",
-    "account.userId": "用户 ID",
-    "account.accountId": "账号 ID",
-    "account.organization": "组织",
-    "account.lastRefresh": "最后刷新",
-
-    // 配额相关
-    "quota.title": "配额",
-    "quota.hourly": "5 小时",
-    "quota.weekly": "每周",
-    "quota.review": "代码审查",
-    "quota.refreshed": "已刷新 {email} 的配额",
-    "quota.refreshFailed": "刷新 {email} 的配额失败：{message}",
-    "quota.refreshAll": "刷新所有配额",
-    "quota.refreshing": "正在刷新配额 ({current}/{total})",
-    "quota.refreshedCount": "已刷新 {count} 个账号的配额",
-    "quota.resetUnknown": "重置时间未知",
-
-    // 时间相关
-    "time.minutesLeft": "剩余{value}分钟",
-    "time.hoursLeft": "剩余{value}小时",
-    "time.daysLeft": "剩余{value}天",
-    "time.minutesAgo": "{value}分钟前",
-    "time.hoursAgo": "{value}小时前",
-    "time.daysAgo": "{value}天前",
-
-    // 操作提示
-    "action.addAccount.progress": "添加 Codex 账号",
-    "action.importAccount.progress": "导入当前 auth.json",
-    "action.switchAccount.progress": "正在切换到 {email}",
-    "action.refreshAll.progress": "刷新所有配额",
-
-    // 成功消息
-    "message.addedAndRefreshed": "已添加 Codex 账号 {email}，并已刷新配额",
-    "message.importedAndRefreshed": "已导入当前 auth.json 为 {email}，并已刷新配额",
-    "message.switchedAndAskReload": "已切换当前 Codex 账号到 {email}。是否立即重载 VS Code 以同步内置 Codex 面板？",
-    "message.alreadyActive": "{label} 已是当前激活账号",
-
-    // 错误消息
-    "message.addedButQuotaFailed": "已添加 Codex 账号 {email}，但刷新配额失败：{message}",
-    "message.importedButQuotaFailed": "已导入当前 auth.json 为 {email}，但刷新配额失败：{message}",
-    "message.addAccountFailed": "添加账号失败：{message}",
-    "message.removeAccountFailed": "移除账号失败：{message}",
-    "message.switchAccountFailed": "切换账号失败：{message}",
-    "message.refreshQuotaFailed": "刷新配额失败：{message}",
-    "message.tokenExpired": "认证令牌已过期，请重新登录",
-    "message.tokenMissing": "认证令牌缺失",
-    "message.accountNotFound": "账号不存在：{accountId}",
-    "message.networkError": "网络错误：{message}",
-    "message.apiError": "API 错误：{message}",
-
-    // 确认对话框
-    "confirm.removeAccount": "确认移除已保存账号 {email}？这不会删除全局 auth.json。",
-    "confirm.removeButton": "删除",
-
-    // 状态栏
-    "status.title": "Codex 配额监控",
-    "status.noAccounts": "还没有保存 Codex 账号",
-    "status.tooltip": "点击打开配额面板",
-    "status.inStatus": "状态栏已显示",
-    "status.addToStatus": "加入状态栏",
-    "status.limitTip": "状态栏最多显示 2 个额外账号",
-
-    // 选择提示
-    "picker.pickActivateAccount": "选择要切换到的账号",
-    "picker.pickRefreshAccount": "选择要刷新的账号",
-    "picker.pickRemoveAccount": "选择要移除的账号",
-    "picker.pickInspectAccount": "选择要查看详情的账号",
-    "picker.pickStatusAccount": "选择要显示在状态栏弹窗中的账号",
-    "picker.noAccounts": "还没有保存 Codex 账号。",
-
-    // 按钮文本
-    "button.reloadNow": "立即重载",
-    "button.later": "稍后",
-    "button.remove": "删除",
-    "button.switch": "切换",
-    "button.refresh": "刷新",
-    "button.details": "详情",
-    "button.cancel": "取消",
-
-    // 面板标题
-    "panel.quotaSummary.title": "codex-tools 配额总览",
-    "panel.details.title": "Codex 账号详情",
-    "panel.dashboard.title": "codex-tools · 配额总览",
-
-    // 本地账号检测
-    "localAccount.detected.title": "检测到本地 Codex 账号",
-    "localAccount.detected.message": "检测到当前机器已有本地 auth.json，是否立即绑定到扩展并刷新最新配额？",
-    "localAccount.detected.action": "立即绑定",
-    "localAccount.bound.success": "已绑定本地账号 {email}，并已刷新配额",
-    "localAccount.bound.partial": "已绑定本地账号 {email}，但刷新配额失败：{message}",
-    "localAccount.bound.failed": "绑定本地账号失败：{message}",
-    "externalAuth.changed.message": "检测到其他窗口已切换 Codex 账号到 {email}。是否立即重载当前窗口以同步内置 Codex 会话？",
-    "externalAuth.changed.reload": "立即重载",
-    "externalAuth.changed.later": "稍后",
-    "codexApp.restart.preference.auto": "帮我自动重启",
-    "codexApp.restart.preference.manual": "每次手动点击重启",
-    "codexApp.restart.preference.message": "检测到 Codex App 正在运行。切换账号后希望如何处理？",
-    "codexApp.restart.manual.message": "检测到 Codex App 正在运行。如需让桌面端同步当前账号，请手动点击重启。",
-    "codexApp.restart.manual.action": "重启 Codex App",
-    "codexApp.restart.manual.later": "暂不重启",
-    "quotaWarning.hourlyLabel": "5小时",
-    "quotaWarning.weeklyLabel": "每周",
-    "quotaWarning.reviewLabel": "代码审查",
-    "quotaWarning.message": "{account} 的 {quota} 配额已降到 {value}%，低于你设置的 {threshold}%。",
-    "quotaWarning.dismiss": "知道了",
-
-    // 状态提示
-    "statusToggle.alwaysShown": "当前激活账号会始终显示在状态栏弹窗顶部。",
-    "statusToggle.added": "已将 {email} 加入状态栏弹窗",
-    "statusToggle.removed": "已将 {email} 从状态栏弹窗移除",
-    "statusToggle.limitReached": "已达到状态栏显示上限（最多 2 个额外账号）"
-  },
-
-  en: {
-    // General
-    "common.loading": "Loading...",
-    "common.success": "Success",
-    "common.error": "Error",
-    "common.cancel": "Cancel",
-    "common.confirm": "Confirm",
-    "common.retry": "Retry",
-    "common.unknown": "unknown",
-    "common.never": "never",
-
-    // Account
-    "account.current": "Current",
-    "account.saved": "Saved",
-    "account.active": "Active",
-    "account.switch": "Switch",
-    "account.add": "Add Account",
-    "account.remove": "Remove Account",
-    "account.import": "Import Current Account",
-    "account.refresh": "Refresh Quota",
-    "account.details": "View Details",
-    "account.teamName": "Team Name",
-    "account.login": "Login",
-    "account.userId": "User ID",
-    "account.accountId": "Account ID",
-    "account.organization": "Organization",
-    "account.lastRefresh": "Last Refresh",
-
-    // Quota
-    "quota.title": "Quota",
-    "quota.hourly": "5h",
-    "quota.weekly": "Weekly",
-    "quota.review": "Review",
-    "quota.refreshed": "Quota refreshed for {email}",
-    "quota.refreshFailed": "Failed to refresh quota for {email}: {message}",
-    "quota.refreshAll": "Refresh All Quotas",
-    "quota.refreshing": "Refreshing quota ({current}/{total})",
-    "quota.refreshedCount": "Refreshed quota for {count} account(s)",
-    "quota.resetUnknown": "reset unknown",
-
-    // Time
-    "time.minutesLeft": "{value}m left",
-    "time.hoursLeft": "{value}h left",
-    "time.daysLeft": "{value}d left",
-    "time.minutesAgo": "{value}m ago",
-    "time.hoursAgo": "{value}h ago",
-    "time.daysAgo": "{value}d ago",
-
-    // Action prompts
-    "action.addAccount.progress": "Adding Codex account",
-    "action.importAccount.progress": "Importing current auth.json",
-    "action.switchAccount.progress": "Switching to {email}",
-    "action.refreshAll.progress": "Refreshing all quotas",
-
-    // Success messages
-    "message.addedAndRefreshed": "Added Codex account {email} and refreshed quota",
-    "message.importedAndRefreshed": "Imported current auth.json as {email} and refreshed quota",
-    "message.switchedAndAskReload":
-      "Active Codex account switched to {email}. Reload VS Code now to sync the built-in Codex panel?",
-    "message.alreadyActive": "{label} is already the active account",
-
-    // Error messages
-    "message.addedButQuotaFailed": "Added Codex account {email}, but quota refresh failed: {message}",
-    "message.importedButQuotaFailed": "Imported current auth.json as {email}, but quota refresh failed: {message}",
-    "message.addAccountFailed": "Add account failed: {message}",
-    "message.removeAccountFailed": "Remove account failed: {message}",
-    "message.switchAccountFailed": "Switch account failed: {message}",
-    "message.refreshQuotaFailed": "Refresh quota failed: {message}",
-    "message.tokenExpired": "Authentication token has expired, please sign in again",
-    "message.tokenMissing": "Authentication token is missing",
-    "message.accountNotFound": "Account not found: {accountId}",
-    "message.networkError": "Network error: {message}",
-    "message.apiError": "API error: {message}",
-
-    // Confirmations
-    "confirm.removeAccount": "Remove saved account {email}? This does not delete the global auth.json.",
-    "confirm.removeButton": "Remove",
-
-    // Status bar
-    "status.title": "Codex Quota Monitor",
-    "status.noAccounts": "No Codex accounts saved yet",
-    "status.tooltip": "Click to open quota panel",
-    "status.inStatus": "In Status",
-    "status.addToStatus": "Add To Status",
-    "status.limitTip": "You can show at most 2 extra accounts in the status popup",
-
-    // Picker placeholders
-    "picker.pickActivateAccount": "Select account to activate",
-    "picker.pickRefreshAccount": "Select account to refresh",
-    "picker.pickRemoveAccount": "Select account to remove",
-    "picker.pickInspectAccount": "Select account to inspect",
-    "picker.pickStatusAccount": "Select account to show in the status popup",
-    "picker.noAccounts": "No Codex accounts saved yet.",
-
-    // Button labels
-    "button.reloadNow": "Reload Now",
-    "button.later": "Later",
-    "button.remove": "Remove",
-    "button.switch": "Switch",
-    "button.refresh": "Refresh",
-    "button.details": "Details",
-    "button.cancel": "Cancel",
-
-    // Panel titles
-    "panel.quotaSummary.title": "codex-tools quota summary",
-    "panel.details.title": "Codex Account Details",
-    "panel.dashboard.title": "codex-tools · Quota Dashboard",
-
-    // Local account detection
-    "localAccount.detected.title": "Local Codex account detected",
-    "localAccount.detected.message":
-      "A local Codex auth.json was found. Bind it to the extension and refresh the latest quota now?",
-    "localAccount.detected.action": "Bind Now",
-    "localAccount.bound.success": "Bound local account {email} and refreshed quota",
-    "localAccount.bound.partial": "Bound local account {email}, but quota refresh failed: {message}",
-    "localAccount.bound.failed": "Failed to bind local account: {message}",
-    "externalAuth.changed.message":
-      "Detected that another window switched the active Codex account to {email}. Reload this window now to sync the built-in Codex session?",
-    "externalAuth.changed.reload": "Reload Now",
-    "externalAuth.changed.later": "Later",
-    "codexApp.restart.preference.auto": "Restart automatically",
-    "codexApp.restart.preference.manual": "Let me restart manually each time",
-    "codexApp.restart.preference.message": "Codex App is currently running. How would you like account switches to handle it?",
-    "codexApp.restart.manual.message":
-      "Codex App is currently running. Restart it manually if you want the desktop app to pick up the new account now.",
-    "codexApp.restart.manual.action": "Restart Codex App",
-    "codexApp.restart.manual.later": "Not Now",
-    "quotaWarning.hourlyLabel": "5h",
-    "quotaWarning.weeklyLabel": "Weekly",
-    "quotaWarning.reviewLabel": "Review",
-    "quotaWarning.message": "{account} {quota} quota is at {value}%, below your configured threshold of {threshold}%.",
-    "quotaWarning.dismiss": "Dismiss",
-
-    // Status toggle
-    "statusToggle.alwaysShown": "The active account is always shown at the top of the status popup.",
-    "statusToggle.added": "Added {email} to the status popup",
-    "statusToggle.removed": "Removed {email} from the status popup",
-    "statusToggle.limitReached": "Status bar display limit reached (max 2 extra accounts)"
-  }
-};
+const translations: TranslationData = messageResources;
 
 /**
  * 插值函数 - 替换翻译中的占位符
@@ -471,26 +194,7 @@ function interpolate(text: string, params?: TranslationParams): string {
  */
 export function getLanguage(): SupportedLanguage {
   const configured = vscode.workspace.getConfiguration("codexAccounts").get<string>("displayLanguage", "auto");
-  if (configured === "zh" || configured === "en") {
-    return configured;
-  }
-
-  const language = vscode.env.language.toLowerCase();
-  return language.startsWith("zh") ? "zh" : "en";
-}
-
-/**
- * 检查是否为中文环境
- */
-export function isZh(): boolean {
-  return getLanguage() === "zh";
-}
-
-/**
- * 检查是否为英文环境
- */
-export function isEn(): boolean {
-  return getLanguage() === "en";
+  return resolveDashboardLanguage(configured, vscode.env.language);
 }
 
 /**
@@ -508,7 +212,7 @@ export function t(lang?: SupportedLanguage) {
   const dict = translations[language];
 
   return function translate(key: TranslationKey, params?: TranslationParams): string {
-    const text = dict[key] ?? translations.en[key] ?? key;
+    const text = dict[key] ?? translations["en"][key] ?? key;
     return interpolate(text, params);
   };
 }
@@ -562,15 +266,12 @@ export function getCommandCopy(): {
   noAccounts: string;
 } {
   const _t = t();
-  const lang = getLanguage();
-
   return {
     progressAddAccount: _t("action.addAccount.progress"),
     progressImportCurrent: _t("action.importAccount.progress"),
     progressSwitch: (email: string) => _t("action.switchAccount.progress", { email }),
     progressRefreshAll: _t("action.refreshAll.progress"),
-    refreshingStep: (index: number, total: number, email: string) =>
-      lang === "zh" ? `${index}/${total} ${email}` : `${index}/${total} ${email}`,
+    refreshingStep: (index: number, total: number, email: string) => `${index}/${total} ${email}`,
     pickActivateAccount: _t("picker.pickActivateAccount"),
     pickRefreshAccount: _t("picker.pickRefreshAccount"),
     pickRemoveAccount: _t("picker.pickRemoveAccount"),
@@ -661,6 +362,7 @@ export function getQuotaWarningCopy(): {
   reviewLabel: string;
   message: (account: string, quota: string, value: number, threshold: number) => string;
   dismiss: string;
+  switchNow: string;
 } {
   const _t = t();
 
@@ -669,6 +371,7 @@ export function getQuotaWarningCopy(): {
     weeklyLabel: _t("quotaWarning.weeklyLabel"),
     reviewLabel: _t("quotaWarning.reviewLabel"),
     dismiss: _t("quotaWarning.dismiss"),
+    switchNow: _t("quotaWarning.switchNow"),
     message: (account: string, quota: string, value: number, threshold: number) =>
       _t("quotaWarning.message", { account, quota, value, threshold })
   };

@@ -3,6 +3,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useReducer } from "preact/hooks";
 import type {
   DashboardAccountViewModel,
+  DashboardActionName,
   DashboardClientMessage,
   DashboardCopy,
   DashboardHostMessage,
@@ -11,28 +12,45 @@ import type {
   DashboardSettings,
   DashboardState
 } from "../../src/domain/dashboard/types";
+import {
+  DASHBOARD_LANGUAGE_OPTIONS,
+  DASHBOARD_LANGUAGE_OPTION_LABELS,
+  getIntlLocale,
+  isDashboardLanguageOption
+} from "../../src/localization/languages";
 
 declare function acquireVsCodeApi(): {
   postMessage(message: DashboardClientMessage): void;
 };
 
 const AUTO_REFRESH_VALUES = [5, 10, 15, 30, 60];
-const WARNING_VALUES = [10, 20, 30, 40, 50];
-type DashboardActionName = Extract<DashboardClientMessage, { type: "dashboard:action" }>["action"];
+const AUTO_SWITCH_VALUES = Array.from({ length: 20 }, (_, index) => index + 1);
+const WARNING_VALUES = Array.from({ length: 18 }, (_, index) => 5 + index * 5);
+const WARNING_SCALE_VALUES = [5, 20, 35, 50, 65, 80, 90];
+type PendingActionRequest = {
+  requestId: string;
+  action: DashboardActionName;
+  accountId?: string;
+};
 
 type AppState = {
   snapshot?: DashboardState;
   settingsOpen: boolean;
+  privacyMode: boolean;
   lastEnabledAutoRefreshMinutes: number;
   now: number;
+  pendingActions: PendingActionRequest[];
 };
 
 type AppAction =
   | { type: "snapshot"; snapshot: DashboardState }
   | { type: "open-settings" }
   | { type: "close-settings" }
+  | { type: "toggle-privacy" }
   | { type: "settings-patch"; patch: Partial<DashboardSettings> }
-  | { type: "tick"; now: number };
+  | { type: "tick"; now: number }
+  | { type: "request-action"; request: PendingActionRequest }
+  | { type: "resolve-action"; requestId: string };
 
 const vscodeApi =
   typeof acquireVsCodeApi === "function"
@@ -46,8 +64,10 @@ const vscodeApi =
 function createInitialState(): AppState {
   return {
     settingsOpen: false,
+    privacyMode: false,
     lastEnabledAutoRefreshMinutes: 15,
-    now: Date.now()
+    now: Date.now(),
+    pendingActions: []
   };
 }
 
@@ -71,6 +91,11 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         settingsOpen: false
+      };
+    case "toggle-privacy":
+      return {
+        ...state,
+        privacyMode: !state.privacyMode
       };
     case "settings-patch":
       if (!state.snapshot) {
@@ -96,6 +121,20 @@ function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         now: action.now
       };
+    case "request-action":
+      if (state.pendingActions.some((request) => request.requestId === action.request.requestId)) {
+        return state;
+      }
+
+      return {
+        ...state,
+        pendingActions: [...state.pendingActions, action.request]
+      };
+    case "resolve-action":
+      return {
+        ...state,
+        pendingActions: state.pendingActions.filter((request) => request.requestId !== action.requestId)
+      };
     default:
       return state;
   }
@@ -106,8 +145,19 @@ function App() {
 
   useEffect(() => {
     const onMessage = (event: MessageEvent<DashboardHostMessage>) => {
-      if (event.data?.type === "dashboard:snapshot") {
-        dispatch({ type: "snapshot", snapshot: event.data.state });
+      if (!event.data) {
+        return;
+      }
+
+      switch (event.data.type) {
+        case "dashboard:snapshot":
+          dispatch({ type: "snapshot", snapshot: event.data.state });
+          return;
+        case "dashboard:action-result":
+          dispatch({ type: "resolve-action", requestId: event.data.requestId });
+          return;
+        default:
+          return;
       }
     };
 
@@ -155,10 +205,20 @@ function App() {
   };
 
   const sendAction = (action: DashboardActionName, accountId?: string): void => {
+    const requestId = createActionRequestId();
+    dispatch({
+      type: "request-action",
+      request: {
+        requestId,
+        action,
+        accountId
+      }
+    });
     postMessageToHost({
       type: "dashboard:action",
       action,
-      accountId
+      accountId,
+      requestId
     });
   };
 
@@ -207,9 +267,17 @@ function App() {
     sendSetting("quotaGreenThreshold", thresholds.green);
   };
 
+  const isActionPending = (action: DashboardActionName, accountId?: string): boolean =>
+    state.pendingActions.some((request) => request.action === action && request.accountId === accountId);
+
+  const hasGlobalPendingAction = state.pendingActions.some((request) => request.accountId == null);
+  const isAccountBusy = (accountId: string): boolean =>
+    hasGlobalPendingAction || state.pendingActions.some((request) => request.accountId === accountId);
+  const privacyToggleLabel = state.privacyMode ? snapshot.copy.showSensitive : snapshot.copy.hideSensitive;
+
   return (
     <>
-      <div class="panel">
+      <div class={`panel ${state.privacyMode ? "privacy-hidden" : ""}`}>
         <section class="section">
           <div class="hero">
             <div class="brand">
@@ -221,14 +289,30 @@ function App() {
             </div>
             <div class="hero-settings">
               <button
+                id="privacyToggleButton"
+                class={`settings-btn ${state.privacyMode ? "is-active" : ""}`}
+                type="button"
+                title={privacyToggleLabel}
+                aria-label={privacyToggleLabel}
+                aria-pressed={state.privacyMode}
+                onClick={() => dispatch({ type: "toggle-privacy" })}
+              >
+                {state.privacyMode ? <EyeOffIcon /> : <EyeIcon />}
+              </button>
+              <button
                 id="refreshViewButton"
-                class="settings-btn refresh-view-btn"
+                class="settings-btn refresh-view-btn action-btn"
                 type="button"
                 title={snapshot.copy.refreshPage}
                 aria-label={snapshot.copy.refreshPage}
+                disabled={hasGlobalPendingAction}
+                aria-busy={isActionPending("refreshView")}
                 onClick={() => sendAction("refreshView")}
               >
-                ↻
+                <span class="button-face">
+                  {isActionPending("refreshView") ? <span class="button-spinner" aria-hidden="true"></span> : null}
+                  <span class="button-label">↻</span>
+                </span>
               </button>
               <button
                 id="settingsOpenButton"
@@ -242,20 +326,22 @@ function App() {
               </button>
             </div>
           </div>
-          {activeAccount ? (
-            <OverviewSection
-              account={activeAccount}
-              lang={snapshot.lang}
-              copy={snapshot.copy}
-              settings={snapshot.settings}
-              now={state.now}
-              onAddAccount={() => sendAction("addAccount")}
-              onImportCurrent={() => sendAction("importCurrent")}
-              onRefreshAll={() => sendAction("refreshAll")}
-            />
-          ) : (
-            <div class="identity">{snapshot.copy.empty}</div>
-          )}
+          <OverviewSection
+            account={activeAccount}
+            hasAccounts={snapshot.accounts.length > 0}
+            lang={snapshot.lang}
+            copy={snapshot.copy}
+            settings={snapshot.settings}
+            now={state.now}
+            privacyMode={state.privacyMode}
+            disabled={hasGlobalPendingAction}
+            addPending={isActionPending("addAccount")}
+            importPending={isActionPending("importCurrent")}
+            refreshAllPending={isActionPending("refreshAll")}
+            onAddAccount={() => sendAction("addAccount")}
+            onImportCurrent={() => sendAction("importCurrent")}
+            onRefreshAll={() => sendAction("refreshAll")}
+          />
         </section>
         {snapshot.accounts.length > 0 ? (
           <section class="section">
@@ -276,6 +362,13 @@ function App() {
                   copy={snapshot.copy}
                   settings={snapshot.settings}
                   now={state.now}
+                  privacyMode={state.privacyMode}
+                  busy={isAccountBusy(account.id)}
+                  switchPending={isActionPending("switch", account.id)}
+                  refreshPending={isActionPending("refresh", account.id)}
+                  detailsPending={isActionPending("details", account.id)}
+                  removePending={isActionPending("remove", account.id)}
+                  togglePending={isActionPending("toggleStatusBar", account.id)}
                   onAction={sendAction}
                 />
               ))}
@@ -284,10 +377,7 @@ function App() {
         ) : null}
       </div>
 
-      <div
-        class={`overlay ${state.settingsOpen ? "open" : ""}`}
-        onClick={() => dispatch({ type: "close-settings" })}
-      >
+      <div class={`overlay ${state.settingsOpen ? "open" : ""}`} onClick={() => dispatch({ type: "close-settings" })}>
         <div class="settings-modal" onClick={(event) => event.stopPropagation()}>
           <div class="settings-modal-head">
             <div class="settings-modal-title">{snapshot.copy.settingsTitle}</div>
@@ -304,74 +394,148 @@ function App() {
                 sendSetting("displayLanguage", value);
               }}
             />
-            <SettingsSegmentBlock
+            <SettingsToggleBlock
               title={snapshot.copy.codexAppRestartTitle}
               sub={snapshot.copy.codexAppRestartSub}
-              note={snapshot.copy.restartModeNote}
-              options={[
-                {
-                  key: "auto",
-                  title: snapshot.copy.restartModeAuto,
-                  description: snapshot.copy.restartModeAutoDesc,
-                  active: snapshot.settings.codexAppRestartMode === "auto",
-                  onClick: () => {
-                    patchSettings({ codexAppRestartMode: "auto" });
-                    sendSetting("codexAppRestartMode", "auto");
-                  }
-                },
-                {
-                  key: "manual",
-                  title: snapshot.copy.restartModeManual,
-                  description: snapshot.copy.restartModeManualDesc,
-                  active: snapshot.settings.codexAppRestartMode === "manual",
-                  onClick: () => {
-                    patchSettings({ codexAppRestartMode: "manual" });
-                    sendSetting("codexAppRestartMode", "manual");
-                  }
-                }
-              ]}
-            />
-            <SettingsSegmentBlock
+              enabled={snapshot.settings.codexAppRestartEnabled}
+              onToggle={(enabled) => {
+                patchSettings({ codexAppRestartEnabled: enabled });
+                sendSetting("codexAppRestartEnabled", enabled);
+              }}
+            >
+              <div class={`settings-stack ${snapshot.settings.codexAppRestartEnabled ? "" : "is-hidden"}`}>
+                <div class="settings-segment">
+                  <button
+                    class={`segment-btn ${snapshot.settings.codexAppRestartMode === "auto" ? "active" : ""}`}
+                    type="button"
+                    onClick={() => {
+                      patchSettings({ codexAppRestartMode: "auto" });
+                      sendSetting("codexAppRestartMode", "auto");
+                    }}
+                  >
+                    <span class="segment-title">{snapshot.copy.restartModeAuto}</span>
+                    <span class="segment-copy">{snapshot.copy.restartModeAutoDesc}</span>
+                  </button>
+                  <button
+                    class={`segment-btn ${snapshot.settings.codexAppRestartMode === "manual" ? "active" : ""}`}
+                    type="button"
+                    onClick={() => {
+                      patchSettings({ codexAppRestartMode: "manual" });
+                      sendSetting("codexAppRestartMode", "manual");
+                    }}
+                  >
+                    <span class="segment-title">{snapshot.copy.restartModeManual}</span>
+                    <span class="segment-copy">{snapshot.copy.restartModeManualDesc}</span>
+                  </button>
+                </div>
+                <div class="settings-note">{snapshot.copy.restartModeNote}</div>
+                <SettingsPathBlock
+                  copy={snapshot.copy}
+                  pathValue={snapshot.settings.resolvedCodexAppPath}
+                  hasCustomPath={Boolean(snapshot.settings.codexAppPath)}
+                  compact
+                  onPick={() => postMessageToHost({ type: "dashboard:pickCodexAppPath" })}
+                  onClear={() => postMessageToHost({ type: "dashboard:clearCodexAppPath" })}
+                />
+              </div>
+            </SettingsToggleBlock>
+            <SettingsToggleBlock
               title={snapshot.copy.autoRefreshTitle}
               sub={snapshot.copy.autoRefreshSub}
-              options={[
-                {
-                  key: "on",
-                  title: snapshot.copy.autoRefreshOn,
-                  description: snapshot.copy.autoRefreshOnDesc,
-                  active: snapshot.settings.autoRefreshMinutes > 0,
-                  onClick: () => handleAutoRefreshToggle(true)
-                },
-                {
-                  key: "off",
-                  title: snapshot.copy.autoRefreshOff,
-                  description: snapshot.copy.autoRefreshOffDesc,
-                  active: snapshot.settings.autoRefreshMinutes === 0,
-                  onClick: () => handleAutoRefreshToggle(false)
-                }
-              ]}
+              enabled={snapshot.settings.autoRefreshMinutes > 0}
+              onToggle={handleAutoRefreshToggle}
             >
-              <div class={`settings-segment ${snapshot.settings.autoRefreshMinutes > 0 ? "" : "is-hidden"}`}>
-                {AUTO_REFRESH_VALUES.map((minutes) => (
-                  <button
-                    key={minutes}
-                    class={`segment-btn ${snapshot.settings.autoRefreshMinutes === minutes ? "active" : ""}`}
-                    type="button"
-                    onClick={() => handleAutoRefreshValue(minutes)}
-                  >
-                    <span class="segment-title">{formatTemplate(snapshot.copy.autoRefreshValueTemplate, minutes)}</span>
-                    <span class="segment-copy">
-                      {formatTemplate(snapshot.copy.autoRefreshValueDescTemplate, minutes)}
-                    </span>
-                  </button>
-                ))}
+              <div class={`settings-stack ${snapshot.settings.autoRefreshMinutes > 0 ? "" : "is-hidden"}`}>
+                <SettingsDiscreteSlider
+                  value={snapshot.settings.autoRefreshMinutes}
+                  values={AUTO_REFRESH_VALUES}
+                  accent="violet"
+                  valueLabel={(value) => formatTemplate(snapshot.copy.autoRefreshValueTemplate, value)}
+                  description={(value) => formatTemplate(snapshot.copy.autoRefreshValueDescTemplate, value)}
+                  onPreview={(value) => patchSettings({ autoRefreshMinutes: value })}
+                  onCommit={handleAutoRefreshValue}
+                />
               </div>
-            </SettingsSegmentBlock>
-            <SettingsPathBlock
+            </SettingsToggleBlock>
+            <SettingsToggleBlock
+              title={snapshot.copy.autoSwitchTitle}
+              sub={snapshot.copy.autoSwitchSub}
+              enabled={snapshot.settings.autoSwitchEnabled}
+              onToggle={(enabled) => {
+                patchSettings({ autoSwitchEnabled: enabled });
+                sendSetting("autoSwitchEnabled", enabled);
+              }}
+            >
+              <div class={`settings-stack ${snapshot.settings.autoSwitchEnabled ? "" : "is-hidden"}`}>
+                <SettingsDiscreteSlider
+                  value={snapshot.settings.autoSwitchHourlyThreshold}
+                  values={AUTO_SWITCH_VALUES}
+                  accent="violet"
+                  sparseScale
+                  valueLabel={(value) => `${value}%`}
+                  description={(value) =>
+                    formatTemplate(snapshot.copy.autoSwitchThresholdDescTemplate, {
+                      label: snapshot.copy.hourlyLabel,
+                      value
+                    })
+                  }
+                  onPreview={(value) => patchSettings({ autoSwitchHourlyThreshold: value })}
+                  onCommit={(value) => {
+                    patchSettings({ autoSwitchHourlyThreshold: value });
+                    sendSetting("autoSwitchHourlyThreshold", value);
+                  }}
+                />
+                <SettingsDiscreteSlider
+                  value={snapshot.settings.autoSwitchWeeklyThreshold}
+                  values={AUTO_SWITCH_VALUES}
+                  accent="sky"
+                  sparseScale
+                  valueLabel={(value) => `${value}%`}
+                  description={(value) =>
+                    formatTemplate(snapshot.copy.autoSwitchThresholdDescTemplate, {
+                      label: snapshot.copy.weeklyLabel,
+                      value
+                    })
+                  }
+                  onPreview={(value) => patchSettings({ autoSwitchWeeklyThreshold: value })}
+                  onCommit={(value) => {
+                    patchSettings({ autoSwitchWeeklyThreshold: value });
+                    sendSetting("autoSwitchWeeklyThreshold", value);
+                  }}
+                />
+                <div class="settings-note">{snapshot.copy.autoSwitchAnyNote}</div>
+              </div>
+            </SettingsToggleBlock>
+            <SettingsToggleBlock
+              title={snapshot.copy.warningTitle}
+              sub={snapshot.copy.warningSub}
+              enabled={snapshot.settings.quotaWarningEnabled}
+              onToggle={(enabled) => {
+                patchSettings({ quotaWarningEnabled: enabled });
+                sendSetting("quotaWarningEnabled", enabled);
+              }}
+            >
+              <div class={`settings-stack ${snapshot.settings.quotaWarningEnabled ? "" : "is-hidden"}`}>
+                <SettingsDiscreteSlider
+                  value={snapshot.settings.quotaWarningThreshold}
+                  values={WARNING_VALUES}
+                  accent="amber"
+                  scaleValues={WARNING_SCALE_VALUES}
+                  valueLabel={(value) => `${value}%`}
+                  description={(value) => formatTemplate(snapshot.copy.warningValueDescTemplate, value)}
+                  onPreview={(value) => patchSettings({ quotaWarningThreshold: value })}
+                  onCommit={(value) => {
+                    patchSettings({ quotaWarningThreshold: value });
+                    sendSetting("quotaWarningThreshold", value);
+                  }}
+                />
+              </div>
+            </SettingsToggleBlock>
+            <SettingsThresholdBlock
               copy={snapshot.copy}
-              pathValue={snapshot.settings.codexAppPath}
-              onPick={() => postMessageToHost({ type: "dashboard:pickCodexAppPath" })}
-              onClear={() => postMessageToHost({ type: "dashboard:clearCodexAppPath" })}
+              settings={snapshot.settings}
+              onPreview={handleThresholdPreview}
+              onCommit={handleThresholdCommit}
             />
             <SettingsSegmentBlock
               title={snapshot.copy.dashboardSettingsTitle}
@@ -398,55 +562,6 @@ function App() {
                   }
                 }
               ]}
-            />
-            <SettingsSegmentBlock
-              title={snapshot.copy.warningTitle}
-              sub={snapshot.copy.warningSub}
-              options={[
-                {
-                  key: "warning-on",
-                  title: snapshot.copy.warningOn,
-                  description: snapshot.copy.warningOnDesc,
-                  active: snapshot.settings.quotaWarningEnabled,
-                  onClick: () => {
-                    patchSettings({ quotaWarningEnabled: true });
-                    sendSetting("quotaWarningEnabled", true);
-                  }
-                },
-                {
-                  key: "warning-off",
-                  title: snapshot.copy.warningOff,
-                  description: snapshot.copy.warningOffDesc,
-                  active: !snapshot.settings.quotaWarningEnabled,
-                  onClick: () => {
-                    patchSettings({ quotaWarningEnabled: false });
-                    sendSetting("quotaWarningEnabled", false);
-                  }
-                }
-              ]}
-            >
-              <div class={`settings-segment ${snapshot.settings.quotaWarningEnabled ? "" : "is-hidden"}`}>
-                {WARNING_VALUES.map((value) => (
-                  <button
-                    key={value}
-                    class={`segment-btn ${snapshot.settings.quotaWarningThreshold === value ? "active" : ""}`}
-                    type="button"
-                    onClick={() => {
-                      patchSettings({ quotaWarningThreshold: value });
-                      sendSetting("quotaWarningThreshold", value);
-                    }}
-                  >
-                    <span class="segment-title">{value}%</span>
-                    <span class="segment-copy">{formatTemplate(snapshot.copy.warningValueDescTemplate, value)}</span>
-                  </button>
-                ))}
-              </div>
-            </SettingsSegmentBlock>
-            <SettingsThresholdBlock
-              copy={snapshot.copy}
-              settings={snapshot.settings}
-              onPreview={handleThresholdPreview}
-              onCommit={handleThresholdCommit}
             />
             <SettingsSegmentBlock
               title={snapshot.copy.debugTitle}
@@ -483,82 +598,124 @@ function App() {
 }
 
 function OverviewSection(props: {
-  account: DashboardAccountViewModel;
+  account?: DashboardAccountViewModel;
+  hasAccounts: boolean;
   lang: DashboardState["lang"];
   copy: DashboardCopy;
   settings: DashboardSettings;
   now: number;
+  privacyMode: boolean;
+  disabled: boolean;
+  addPending: boolean;
+  importPending: boolean;
+  refreshAllPending: boolean;
   onAddAccount: () => void;
   onImportCurrent: () => void;
   onRefreshAll: () => void;
 }) {
-  const { account, copy, settings, now } = props;
+  const { account, copy, settings, now, hasAccounts, privacyMode } = props;
+  const emptyTitle = hasAccounts ? copy.noActiveAccountTitle : copy.empty;
+  const emptySub = hasAccounts ? copy.noActiveAccountSub : copy.savedAccountsSub;
 
   return (
     <div class="overview-shell">
-      <div class="overview-account">
-        <div class="overview-account-top">
-          <div class="overview-account-name">{account.displayName}</div>
-          <div class="pill active">{copy.current}</div>
-          <div class="pill plan">{account.planTypeLabel}</div>
-          {account.hasQuota402 ? <div class="pill error">402</div> : null}
+      {account ? (
+        <div class="overview-account">
+          <div class="overview-account-top">
+            <div class="overview-account-name">{getSensitiveDisplayValue(account.displayName, privacyMode, "name")}</div>
+            <div class="pill active">{copy.current}</div>
+            <div class="pill plan">{account.planTypeLabel}</div>
+            {account.hasQuota402 ? <div class="pill error">402</div> : null}
+          </div>
+          <div class="overview-account-email">{getSensitiveDisplayValue(account.email, privacyMode, "email")}</div>
+          <div class="overview-account-meta">
+            {account.authProviderLabel} · {account.accountStructureLabel}
+          </div>
+          <div class="overview-meta">
+            <div class="overview-meta-item">
+              <span class="grid-label">{copy.userId}</span>
+              <span class="meta-value">{getSensitiveDisplayValue(account.userId, privacyMode, "id", copy.unknown)}</span>
+            </div>
+            <div class="overview-meta-item">
+              <span class="grid-label">{copy.accountId}</span>
+              <span class="meta-value">
+                {getSensitiveDisplayValue(account.accountId, privacyMode, "id", copy.unknown)}
+              </span>
+            </div>
+            <div class="overview-meta-item">
+              <span class="grid-label">{copy.lastRefresh}</span>
+              <span class="meta-value">{formatTimestamp(account.lastQuotaAt, copy.never)}</span>
+            </div>
+            <div class="overview-meta-item">
+              <span class="grid-label">{copy.organization}</span>
+              <span class="meta-value">
+                {getSensitiveDisplayValue(account.organizationId, privacyMode, "id", copy.unknown)}
+              </span>
+            </div>
+          </div>
         </div>
-        <div class="overview-account-email">{account.email}</div>
-        <div class="overview-account-meta">
-          {account.authProviderLabel} · {account.accountStructureLabel}
+      ) : (
+        <div class="overview-account overview-empty-panel">
+          <div class="overview-empty-badge">{copy.dashboardTitle}</div>
+          <div class="overview-empty-title">{emptyTitle}</div>
+          <div class="overview-empty-sub">{emptySub}</div>
         </div>
-        <div class="overview-meta">
-          <div class="overview-meta-item">
-            <span class="grid-label">{copy.userId}</span>
-            <span class="meta-value">{account.userId ?? copy.unknown}</span>
-          </div>
-          <div class="overview-meta-item">
-            <span class="grid-label">{copy.accountId}</span>
-            <span class="meta-value">{account.accountId ?? copy.unknown}</span>
-          </div>
-          <div class="overview-meta-item">
-            <span class="grid-label">{copy.lastRefresh}</span>
-            <span class="meta-value">{formatTimestamp(account.lastQuotaAt, copy.never)}</span>
-          </div>
-          <div class="overview-meta-item">
-            <span class="grid-label">{copy.organization}</span>
-            <span class="meta-value">{account.organizationId ?? copy.unknown}</span>
-          </div>
-        </div>
-      </div>
+      )}
       <div class="overview-main">
         <div class="overview-head">
           <div class="overview-head-title">{copy.dashboardTitle}</div>
           <div class="overview-head-sub">{copy.dashboardSub}</div>
         </div>
         <div class="overview-metrics">
-          <div class="metrics">
-            {account.metrics
-              .filter((metric) => metric.visible)
-              .map((metric) => (
-                <MetricGauge
-                  key={metric.key}
-                  metric={metric}
-                  lang={props.lang}
-                  settings={settings}
-                  copy={copy}
-                  now={now}
-                />
-              ))}
-          </div>
+          {account ? (
+            <div class="metrics">
+              {account.metrics
+                .filter((metric) => metric.visible)
+                .map((metric) => (
+                  <MetricGauge
+                    key={metric.key}
+                    metric={metric}
+                    lang={props.lang}
+                    settings={settings}
+                    copy={copy}
+                    now={now}
+                  />
+                ))}
+            </div>
+          ) : (
+            <div class="overview-empty-copy">
+              <div class="overview-empty-copy-title">{emptyTitle}</div>
+              <div class="overview-empty-copy-sub">{emptySub}</div>
+            </div>
+          )}
         </div>
       </div>
       <div class="overview-actions">
         <div class="toolbar">
-          <button class="toolbar-btn primary-btn" type="button" onClick={props.onAddAccount}>
+          <ActionButton
+            class="toolbar-btn primary-btn"
+            pending={props.addPending}
+            disabled={props.disabled}
+            onClick={props.onAddAccount}
+          >
             {copy.addAccount}
-          </button>
-          <button class="toolbar-btn" type="button" onClick={props.onImportCurrent}>
+          </ActionButton>
+          <ActionButton
+            class="toolbar-btn"
+            pending={props.importPending}
+            disabled={props.disabled}
+            onClick={props.onImportCurrent}
+          >
             {copy.importCurrent}
-          </button>
-          <button class="toolbar-btn" type="button" onClick={props.onRefreshAll}>
+          </ActionButton>
+          <ActionButton
+            class="toolbar-btn"
+            pending={props.refreshAllPending}
+            disabled={props.disabled}
+            onClick={props.onRefreshAll}
+          >
             {copy.refreshAll}
-          </button>
+          </ActionButton>
         </div>
       </div>
     </div>
@@ -571,40 +728,49 @@ function SavedAccountCard(props: {
   copy: DashboardCopy;
   settings: DashboardSettings;
   now: number;
+  privacyMode: boolean;
+  busy: boolean;
+  switchPending: boolean;
+  refreshPending: boolean;
+  detailsPending: boolean;
+  removePending: boolean;
+  togglePending: boolean;
   onAction: (action: "details" | "switch" | "refresh" | "remove" | "toggleStatusBar", accountId?: string) => void;
 }) {
-  const { account, copy, settings, now, onAction } = props;
+  const { account, copy, settings, now, onAction, privacyMode } = props;
+  const userIdDisplay = getSensitiveDisplayValue(account.userId ?? account.accountId, privacyMode, "id", "-");
 
   return (
-    <article class={`saved-card ${account.isActive ? "active" : ""}`}>
+    <article class={`saved-card ${account.isActive ? "active" : ""} ${props.busy ? "is-busy" : ""}`}>
       <div class="saved-head">
         {!account.isActive ? (
           <label
-            class={`saved-toggle ${account.canToggleStatusBar ? "" : "disabled"}`}
+            class={`saved-toggle ${account.canToggleStatusBar ? "" : "disabled"} ${props.togglePending ? "is-pending" : ""}`}
             title={account.statusToggleTitle}
             aria-label={account.statusToggleTitle}
           >
             <input
               type="checkbox"
               checked={account.showInStatusBar}
-              disabled={!account.canToggleStatusBar}
+              disabled={!account.canToggleStatusBar || props.busy}
               onChange={() => onAction("toggleStatusBar", account.id)}
             />
             <span class="saved-toggle-mark"></span>
             <span class="saved-toggle-text">{copy.statusShort}</span>
+            {props.togglePending ? <span class="saved-toggle-spinner" aria-hidden="true"></span> : null}
           </label>
         ) : null}
         <div class="saved-title">
-          <h3>{account.displayName}</h3>
-          <div class="saved-sub">{account.email}</div>
+          <h3>{getSensitiveDisplayValue(account.displayName, privacyMode, "name")}</h3>
+          <div class="saved-sub">{getSensitiveDisplayValue(account.email, privacyMode, "email")}</div>
           <div class="saved-sub">
-            {copy.teamName}: {account.accountName ?? copy.unknown}
+            {copy.teamName}: {getSensitiveDisplayValue(account.accountName, privacyMode, "name", copy.unknown)}
           </div>
           <div class="saved-sub">
             {copy.login}: {account.authProviderLabel}
           </div>
-          <div class="saved-sub truncate" title={`${copy.userId}: ${account.userId ?? account.accountId ?? "-"}`}>
-            {copy.userId}: {account.userId ?? account.accountId ?? "-"}
+          <div class="saved-sub truncate" title={`${copy.userId}: ${userIdDisplay}`}>
+            {copy.userId}: {userIdDisplay}
           </div>
           <div class="saved-meta">
             {account.isActive ? <span class="pill active">{copy.current}</span> : null}
@@ -618,34 +784,62 @@ function SavedAccountCard(props: {
         {account.metrics
           .filter((metric) => metric.visible)
           .map((metric) => (
-            <MetricRow
-              key={metric.key}
-              metric={metric}
-              lang={props.lang}
-              settings={settings}
-              copy={copy}
-              now={now}
-            />
+            <MetricRow key={metric.key} metric={metric} lang={props.lang} settings={settings} copy={copy} now={now} />
           ))}
       </div>
       <div class="saved-refresh">
         {copy.lastRefresh}: {formatTimestamp(account.lastQuotaAt, copy.never)}
       </div>
       <div class="saved-actions">
-        <button type="button" onClick={() => onAction("switch", account.id)}>
+        <ActionButton
+          pending={props.switchPending}
+          disabled={props.busy}
+          onClick={() => onAction("switch", account.id)}
+        >
           {copy.switchBtn}
-        </button>
-        <button type="button" onClick={() => onAction("refresh", account.id)}>
+        </ActionButton>
+        <ActionButton
+          pending={props.refreshPending}
+          disabled={props.busy}
+          onClick={() => onAction("refresh", account.id)}
+        >
           {copy.refreshBtn}
-        </button>
-        <button type="button" onClick={() => onAction("details", account.id)}>
+        </ActionButton>
+        <ActionButton
+          pending={props.detailsPending}
+          disabled={props.busy}
+          onClick={() => onAction("details", account.id)}
+        >
           {copy.detailsBtn}
-        </button>
-        <button type="button" onClick={() => onAction("remove", account.id)}>
+        </ActionButton>
+        <ActionButton
+          pending={props.removePending}
+          disabled={props.busy}
+          onClick={() => onAction("remove", account.id)}
+        >
           {copy.removeBtn}
-        </button>
+        </ActionButton>
       </div>
     </article>
+  );
+}
+
+function ActionButton(props: {
+  class?: string;
+  pending?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ComponentChildren;
+}) {
+  const className = [props.class, "action-btn", props.pending ? "is-pending" : ""].filter(Boolean).join(" ");
+
+  return (
+    <button class={className} type="button" disabled={props.disabled} aria-busy={props.pending} onClick={props.onClick}>
+      <span class="button-face">
+        {props.pending ? <span class="button-spinner" aria-hidden="true"></span> : null}
+        <span class="button-label">{props.children}</span>
+      </span>
+    </button>
   );
 }
 
@@ -725,11 +919,18 @@ function SettingsLanguageBlock(props: {
       <select
         class="settings-select"
         value={props.settings.displayLanguage}
-        onChange={(event) => props.onChange((event.currentTarget as HTMLSelectElement).value as DashboardSettings["displayLanguage"])}
+        onChange={(event) => {
+          const nextValue = event.currentTarget.value;
+          if (isDashboardLanguageOption(nextValue)) {
+            props.onChange(nextValue);
+          }
+        }}
       >
-        <option value="auto">{props.copy.languageAuto}</option>
-        <option value="zh">{props.copy.languageZh}</option>
-        <option value="en">{props.copy.languageEn}</option>
+        {DASHBOARD_LANGUAGE_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            {option === "auto" ? props.copy.languageAuto : DASHBOARD_LANGUAGE_OPTION_LABELS[option]}
+          </option>
+        ))}
       </select>
       <div class="settings-note">{props.copy.languageNote}</div>
     </div>
@@ -774,29 +975,67 @@ function SettingsSegmentBlock(props: {
   );
 }
 
-function SettingsPathBlock(props: {
-  copy: DashboardCopy;
-  pathValue: string;
-  onPick: () => void;
-  onClear: () => void;
+function SettingsToggleBlock(props: {
+  title: string;
+  sub: string;
+  enabled: boolean;
+  onToggle: (enabled: boolean) => void;
+  children?: ComponentChildren;
 }) {
   return (
     <div class="settings-block">
+      <div class="settings-toggle-head">
+        <div class="settings-block-head">
+          <div class="settings-block-title">{props.title}</div>
+          <div class="settings-block-sub">{props.sub}</div>
+        </div>
+        <button
+          class={`settings-inline-toggle ${props.enabled ? "active" : ""}`}
+          type="button"
+          aria-pressed={props.enabled}
+          onClick={() => props.onToggle(!props.enabled)}
+        >
+          <span class="settings-inline-toggle-track">
+            <span class="settings-inline-toggle-thumb"></span>
+          </span>
+        </button>
+      </div>
+      {props.children}
+    </div>
+  );
+}
+
+function SettingsPathBlock(props: {
+  copy: DashboardCopy;
+  pathValue: string;
+  hasCustomPath: boolean;
+  compact?: boolean;
+  onPick: () => void;
+  onClear: () => void;
+}) {
+  const content = (
+    <>
       <div class="settings-block-head">
         <div class="settings-block-title">{props.copy.appPathTitle}</div>
         <div class="settings-block-sub">{props.copy.appPathSub}</div>
       </div>
       <div class="settings-note">{props.pathValue || props.copy.appPathEmpty}</div>
-      <div class="saved-actions" style={{ padding: "0", borderTop: "0", justifyContent: "flex-start" }}>
+      <div class="saved-actions settings-inline-actions">
         <button type="button" onClick={props.onPick}>
           {props.copy.pickPath}
         </button>
-        <button type="button" disabled={!props.pathValue} onClick={props.onClear}>
+        <button type="button" disabled={!props.hasCustomPath} onClick={props.onClear}>
           {props.copy.clearPath}
         </button>
       </div>
-    </div>
+    </>
   );
+
+  if (props.compact) {
+    return <div class="settings-stack settings-path-inline">{content}</div>;
+  }
+
+  return <div class="settings-block">{content}</div>;
 }
 
 function SettingsThresholdBlock(props: {
@@ -853,8 +1092,8 @@ function SettingsThresholdBlock(props: {
             max="100"
             step="1"
             value={yellow}
-            onInput={(event) => props.onPreview("yellow", Number((event.currentTarget as HTMLInputElement).value))}
-            onChange={(event) => props.onCommit("yellow", Number((event.currentTarget as HTMLInputElement).value))}
+            onInput={(event) => props.onPreview("yellow", Number(event.currentTarget.value))}
+            onChange={(event) => props.onCommit("yellow", Number(event.currentTarget.value))}
           />
           <input
             class="threshold-range threshold-range-green"
@@ -863,8 +1102,8 @@ function SettingsThresholdBlock(props: {
             max="100"
             step="1"
             value={green}
-            onInput={(event) => props.onPreview("green", Number((event.currentTarget as HTMLInputElement).value))}
-            onChange={(event) => props.onCommit("green", Number((event.currentTarget as HTMLInputElement).value))}
+            onInput={(event) => props.onPreview("green", Number(event.currentTarget.value))}
+            onChange={(event) => props.onCommit("green", Number(event.currentTarget.value))}
           />
         </div>
         <div class="threshold-slider-scale">
@@ -872,6 +1111,82 @@ function SettingsThresholdBlock(props: {
           <span>50%</span>
           <span>100%</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsDiscreteSlider(props: {
+  value: number;
+  values: number[];
+  accent: "violet" | "amber" | "sky";
+  valueLabel: (value: number) => string;
+  description: (value: number) => string;
+  sparseScale?: boolean;
+  scaleValues?: number[];
+  onPreview: (value: number) => void;
+  onCommit: (value: number) => void;
+}) {
+  const currentIndex = resolveDiscreteIndex(props.values, props.value);
+  const currentValue = props.values[currentIndex] ?? props.values[0] ?? 0;
+  const progress = resolveDiscretePercent(props.values, currentValue);
+  const minValue = props.values[0] ?? 0;
+  const maxValue = props.values[props.values.length - 1] ?? minValue;
+  const fillStyle = {
+    width: `${progress}%`
+  } as Record<string, string>;
+  const thumbStyle = {
+    left: `${progress}%`
+  } as Record<string, string>;
+
+  return (
+    <div class={`step-slider step-slider-${props.accent}`}>
+      <div class="step-slider-head">
+        <div class="step-slider-copy">{props.description(currentValue)}</div>
+        <div class="step-slider-value">{props.valueLabel(currentValue)}</div>
+      </div>
+      <div class="step-slider-stack">
+        <div class="step-slider-rail"></div>
+        <div class="step-slider-fill" style={fillStyle}></div>
+        <div class="step-slider-thumb" style={thumbStyle}></div>
+        <input
+          class={`step-slider-range step-slider-range-${props.accent}`}
+          type="range"
+          min={String(minValue)}
+          max={String(maxValue)}
+          step="1"
+          value={currentValue}
+          onInput={(event) => {
+            const nextRawValue = Number(event.currentTarget.value);
+            props.onPreview(resolveNearestDiscreteValue(props.values, nextRawValue));
+          }}
+          onChange={(event) => {
+            const nextRawValue = Number(event.currentTarget.value);
+            props.onCommit(resolveNearestDiscreteValue(props.values, nextRawValue));
+          }}
+        />
+      </div>
+      <div class="step-slider-scale">
+        {(props.scaleValues ?? (props.sparseScale ? pickSparseScaleValues(props.values) : props.values)).map(
+          (value, index, scaleValues) => {
+            const markerPercent = resolveDiscretePercent(props.values, value);
+            const labelStyle = {
+              left: `${markerPercent}%`
+            } as Record<string, string>;
+
+            return (
+              <span
+                key={value}
+                class={`step-slider-scale-label ${
+                  index === 0 ? "is-start" : index === scaleValues.length - 1 ? "is-end" : ""
+                }`}
+                style={labelStyle}
+              >
+                {props.valueLabel(value)}
+              </span>
+            );
+          }
+        )}
       </div>
     </div>
   );
@@ -949,27 +1264,28 @@ function formatRelativeReset(resetAt: number, now: number, lang: DashboardState[
 }
 
 function relativeTime(lang: DashboardState["lang"], value: number, unit: "m" | "h" | "d", future: boolean): string {
-  if (lang === "zh") {
-    if (unit === "m") {
-      return future ? `剩余${value}分钟` : `${value}分钟前`;
-    }
-    if (unit === "h") {
-      return future ? `剩余${value}小时` : `${value}小时前`;
-    }
-    return future ? `剩余${value}天` : `${value}天前`;
-  }
+  const formatter = new Intl.RelativeTimeFormat(getIntlLocale(lang), {
+    numeric: "always",
+    style: "short"
+  });
+  const unitMap = {
+    m: "minute",
+    h: "hour",
+    d: "day"
+  } as const;
 
-  if (unit === "m") {
-    return future ? `${value}m left` : `${value}m ago`;
-  }
-  if (unit === "h") {
-    return future ? `${value}h left` : `${value}h ago`;
-  }
-  return future ? `${value}d left` : `${value}d ago`;
+  return formatter.format(future ? value : -value, unitMap[unit]);
 }
 
-function formatTemplate(template: string, value: number): string {
-  return template.replace("{value}", String(value));
+function formatTemplate(template: string, value: number | Record<string, string | number>): string {
+  if (typeof value === "number") {
+    return template.replace("{value}", String(value));
+  }
+
+  return Object.entries(value).reduce(
+    (result, [key, item]) => result.replace(new RegExp(`\\{${key}\\}`, "g"), String(item)),
+    template
+  );
 }
 
 function normalizeThresholds(green: number, yellow: number): { green: number; yellow: number } {
@@ -982,6 +1298,166 @@ function normalizeThresholds(green: number, yellow: number): { green: number; ye
     green: safeGreen,
     yellow: safeYellow
   };
+}
+
+function resolveDiscreteIndex(values: number[], currentValue: number): number {
+  const matchedIndex = values.indexOf(currentValue);
+  if (matchedIndex >= 0) {
+    return matchedIndex;
+  }
+
+  let nearestIndex = 0;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  values.forEach((value, index) => {
+    const distance = Math.abs(value - currentValue);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestIndex = index;
+    }
+  });
+
+  return nearestIndex;
+}
+
+function resolveNearestDiscreteValue(values: number[], rawValue: number): number {
+  const nearestIndex = resolveDiscreteIndex(values, rawValue);
+  return values[nearestIndex] ?? values[0] ?? 0;
+}
+
+type SensitiveKind = "email" | "id" | "name";
+
+function getSensitiveDisplayValue(
+  value: string | undefined,
+  hidden: boolean,
+  kind: SensitiveKind,
+  fallback = "—"
+): string {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return fallback;
+  }
+
+  return hidden ? maskSensitiveValue(normalized, kind) : normalized;
+}
+
+function maskSensitiveValue(value: string, kind: SensitiveKind): string {
+  switch (kind) {
+    case "email":
+      return maskEmail(value);
+    case "name":
+      return maskSegmentedValue(value);
+    case "id":
+      return createMask(value.length, 10, 18);
+    default:
+      return createMask(value.length);
+  }
+}
+
+function maskEmail(value: string): string {
+  const [localPart, domainPart] = value.split("@");
+  if (!localPart || !domainPart) {
+    return createMask(value.length);
+  }
+
+  return `${createMask(localPart.length, 4, 10)}@${createMask(domainPart.length, 4, 10)}`;
+}
+
+function maskSegmentedValue(value: string): string {
+  return value
+    .split(/(\s+|[._\-\\/]+)/)
+    .map((segment) => (/^(\s+|[._\-\\/]+)$/.test(segment) ? segment : createMask(segment.length, 3, 8)))
+    .join("");
+}
+
+function createMask(length: number, min = 6, max = 12): string {
+  return "*".repeat(Math.max(min, Math.min(max, Math.max(1, length))));
+}
+
+function EyeIcon() {
+  return (
+    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M1.5 12s3.8-6 10.5-6 10.5 6 10.5 6-3.8 6-10.5 6S1.5 12 1.5 12Z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M3 3l18 18"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M10.6 5.7A12.6 12.6 0 0 1 12 5.6c6.7 0 10.5 6.4 10.5 6.4a18.4 18.4 0 0 1-4 4.5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M6.2 7.2A18.8 18.8 0 0 0 1.5 12s3.8 6 10.5 6c1.6 0 3-.3 4.3-.8"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M9.9 9.8A3.2 3.2 0 0 0 14.2 14"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
+function resolveDiscretePercent(values: number[], currentValue: number): number {
+  const first = values[0];
+  const last = values[values.length - 1];
+  if (typeof first !== "number" || typeof last !== "number" || first === last) {
+    return 0;
+  }
+
+  return ((currentValue - first) / (last - first)) * 100;
+}
+
+function pickSparseScaleValues(values: number[]): number[] {
+  if (values.length <= 3) {
+    return values;
+  }
+
+  const first = values[0];
+  const middle = values[Math.floor((values.length - 1) / 2)];
+  const last = values[values.length - 1];
+
+  return [first, middle, last].filter(
+    (value, index, array): value is number => typeof value === "number" && array.indexOf(value) === index
+  );
+}
+
+let actionRequestSequence = 0;
+
+function createActionRequestId(): string {
+  actionRequestSequence += 1;
+  return `dashboard-action-${actionRequestSequence}`;
 }
 
 function postMessageToHost(message: DashboardClientMessage): void {

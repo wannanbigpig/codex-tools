@@ -1,7 +1,13 @@
 import * as vscode from "vscode";
 import { buildDashboardState } from "../../application/dashboard/buildDashboardState";
 import { getDashboardCopy } from "../../application/dashboard/copy";
-import { DashboardClientMessage, DashboardHostMessage, DashboardSettingKey } from "../../domain/dashboard/types";
+import {
+  DashboardActionName,
+  DashboardClientMessage,
+  DashboardHostMessage,
+  DashboardSettingKey
+} from "../../domain/dashboard/types";
+import { isDashboardLanguageOption } from "../../localization/languages";
 import { ExtensionSettingsStore } from "../../infrastructure/config/extensionSettings";
 import { AccountsRepository } from "../../storage";
 
@@ -91,7 +97,7 @@ class DashboardPanelController {
         await this.publishState();
         return;
       case "dashboard:action":
-        await this.handleActionMessage(message.action, message.accountId);
+        await this.handleActionMessage(message);
         return;
       case "dashboard:setting":
         await this.handleSettingUpdate(message.key, message.value);
@@ -100,7 +106,9 @@ class DashboardPanelController {
         await this.pickCodexAppPath();
         return;
       case "dashboard:clearCodexAppPath":
-        await vscode.workspace.getConfiguration("codexAccounts").update("codexAppPath", "", vscode.ConfigurationTarget.Global);
+        await vscode.workspace
+          .getConfiguration("codexAccounts")
+          .update("codexAppPath", "", vscode.ConfigurationTarget.Global);
         return;
       default:
         return;
@@ -108,11 +116,25 @@ class DashboardPanelController {
   }
 
   private async handleActionMessage(
-    action: Exclude<DashboardClientMessage, { type: "dashboard:ready" | "dashboard:setting" | "dashboard:pickCodexAppPath" | "dashboard:clearCodexAppPath" }>["action"],
-    accountId?: string
+    message: Extract<DashboardClientMessage, { type: "dashboard:action" }>
   ): Promise<void> {
-    const account = accountId ? await this.repo.getAccount(accountId) : undefined;
+    let status: Extract<DashboardHostMessage, { type: "dashboard:action-result" }>["status"] = "completed";
 
+    try {
+      const account = message.accountId ? await this.repo.getAccount(message.accountId) : undefined;
+      await this.runAction(message.action, account);
+    } catch (error) {
+      status = "failed";
+      console.error(`[codexAccounts] dashboard action failed: ${message.action}`, error);
+    } finally {
+      await this.postActionResult(message.requestId, message.action, status, message.accountId);
+    }
+  }
+
+  private async runAction(
+    action: DashboardActionName,
+    account?: Awaited<ReturnType<AccountsRepository["getAccount"]>>
+  ): Promise<void> {
     switch (action) {
       case "addAccount":
         await vscode.commands.executeCommand("codexAccounts.addAccount");
@@ -156,16 +178,43 @@ class DashboardPanelController {
     }
   }
 
+  private async postActionResult(
+    requestId: string,
+    action: DashboardActionName,
+    status: Extract<DashboardHostMessage, { type: "dashboard:action-result" }>["status"],
+    accountId?: string
+  ): Promise<void> {
+    if (!this.panel || !this.webviewReady) {
+      return;
+    }
+
+    const message: DashboardHostMessage = {
+      type: "dashboard:action-result",
+      requestId,
+      action,
+      accountId,
+      status
+    };
+    await this.panel.webview.postMessage(message);
+  }
+
   private async handleSettingUpdate(key: DashboardSettingKey, value: string | number | boolean): Promise<void> {
     const config = vscode.workspace.getConfiguration("codexAccounts");
 
     switch (key) {
+      case "codexAppRestartEnabled":
+        if (typeof value === "boolean") {
+          await config.update(key, value, vscode.ConfigurationTarget.Global);
+        }
+        return;
       case "codexAppRestartMode":
         if (value === "auto" || value === "manual") {
           await config.update(key, value, vscode.ConfigurationTarget.Global);
         }
         return;
       case "autoRefreshMinutes":
+      case "autoSwitchHourlyThreshold":
+      case "autoSwitchWeeklyThreshold":
       case "quotaWarningThreshold":
       case "quotaGreenThreshold":
       case "quotaYellowThreshold":
@@ -173,6 +222,7 @@ class DashboardPanelController {
           await config.update(key, value, vscode.ConfigurationTarget.Global);
         }
         return;
+      case "autoSwitchEnabled":
       case "showCodeReviewQuota":
       case "quotaWarningEnabled":
       case "debugNetwork":
@@ -181,7 +231,7 @@ class DashboardPanelController {
         }
         return;
       case "displayLanguage":
-        if (value === "auto" || value === "zh" || value === "en") {
+        if (typeof value === "string" && isDashboardLanguageOption(value)) {
           await config.update(key, value, vscode.ConfigurationTarget.Global);
         }
         return;

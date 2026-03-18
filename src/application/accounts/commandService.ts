@@ -5,17 +5,13 @@ import { getCodexHome } from "../../codex";
 import { getErrorMessage } from "../../core";
 import { CodexAccountRecord } from "../../core/types";
 import { AccountsRepository } from "../../storage";
-import {
-  getCodexAppRestartCopy,
-  getCodexAppState,
-  getCommandCopy,
-  restartCodexAppIfInstalled
-} from "../../utils";
+import { getCodexAppRestartCopy, getCodexAppState, getCommandCopy, restartCodexAppIfInstalled } from "../../utils";
 import { openDetailsPanel } from "../../ui";
 import { openQuotaSummaryPanel } from "../../ui/quotaSummary";
 import {
   RefreshView,
   formatAccountToastLabel,
+  maybeAutoSwitchForActiveQuota,
   maybeWarnForActiveQuota,
   refreshImportedAccountQuota,
   refreshSingleQuota,
@@ -23,6 +19,7 @@ import {
 } from "./quota";
 
 const CODEX_APP_RESTART_MODE = "codexAppRestartMode";
+const CODEX_APP_RESTART_ENABLED = "codexAppRestartEnabled";
 
 export class AccountsCommandService {
   constructor(
@@ -130,7 +127,10 @@ export class AccountsCommandService {
     }
 
     this.view.refresh();
-    await maybeWarnForActiveQuota(this.repo);
+    const switched = await maybeAutoSwitchForActiveQuota(this.repo, this.view);
+    if (!switched) {
+      await maybeWarnForActiveQuota(this.repo);
+    }
     if (!options?.silent) {
       void vscode.window.showInformationMessage(copy.refreshedCount(accounts.length));
     }
@@ -143,7 +143,11 @@ export class AccountsCommandService {
       return;
     }
 
-    const confirmed = await vscode.window.showWarningMessage(copy.confirmRemove(account.email), { modal: true }, copy.remove);
+    const confirmed = await vscode.window.showWarningMessage(
+      copy.confirmRemove(account.email),
+      { modal: true },
+      copy.remove
+    );
     if (confirmed !== copy.remove) {
       return;
     }
@@ -196,6 +200,10 @@ export class AccountsCommandService {
   }
 
   private async handleCodexAppRestartPreference(): Promise<void> {
+    if (!vscode.workspace.getConfiguration("codexAccounts").get<boolean>(CODEX_APP_RESTART_ENABLED, false)) {
+      return;
+    }
+
     const state = await getCodexAppState();
     if (!state.installed || !state.running) {
       return;

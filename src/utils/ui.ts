@@ -42,7 +42,7 @@ export function colorForPercentage(value?: number): string {
   return colorForPercentageWithThresholds(value, thresholds);
 }
 
-export function colorForPercentageWithThresholds(value: number | undefined, thresholds: QuotaColorThresholds): string {
+function colorForPercentageWithThresholds(value: number | undefined, thresholds: QuotaColorThresholds): string {
   if (typeof value !== "number" || Number.isNaN(value)) {
     return "#7ddc7a";
   }

@@ -1,8 +1,12 @@
-export type DashboardLanguage = "zh" | "en";
+import type { DashboardLanguage, DashboardLanguageOption } from "../../localization/languages";
 
 export type DashboardSettingKey =
+  | "codexAppRestartEnabled"
   | "codexAppRestartMode"
   | "autoRefreshMinutes"
+  | "autoSwitchEnabled"
+  | "autoSwitchHourlyThreshold"
+  | "autoSwitchWeeklyThreshold"
   | "showCodeReviewQuota"
   | "quotaWarningEnabled"
   | "quotaWarningThreshold"
@@ -12,16 +16,21 @@ export type DashboardSettingKey =
   | "displayLanguage";
 
 export interface DashboardSettings {
+  codexAppRestartEnabled: boolean;
   codexAppRestartMode: "auto" | "manual";
   autoRefreshMinutes: number;
+  autoSwitchEnabled: boolean;
+  autoSwitchHourlyThreshold: number;
+  autoSwitchWeeklyThreshold: number;
   codexAppPath: string;
+  resolvedCodexAppPath: string;
   showCodeReviewQuota: boolean;
   quotaWarningEnabled: boolean;
   quotaWarningThreshold: number;
   quotaGreenThreshold: number;
   quotaYellowThreshold: number;
   debugNetwork: boolean;
-  displayLanguage: "auto" | "zh" | "en";
+  displayLanguage: DashboardLanguageOption;
 }
 
 export interface DashboardCopy {
@@ -34,6 +43,8 @@ export interface DashboardCopy {
   dashboardTitle: string;
   dashboardSub: string;
   empty: string;
+  noActiveAccountTitle: string;
+  noActiveAccountSub: string;
   current: string;
   hourlyLabel: string;
   weeklyLabel: string;
@@ -51,6 +62,8 @@ export interface DashboardCopy {
   detailsBtn: string;
   removeBtn: string;
   settingsTitle: string;
+  showSensitive: string;
+  hideSensitive: string;
   codexAppRestartTitle: string;
   codexAppRestartSub: string;
   restartModeAuto: string;
@@ -66,6 +79,16 @@ export interface DashboardCopy {
   autoRefreshOffDesc: string;
   autoRefreshValueTemplate: string;
   autoRefreshValueDescTemplate: string;
+  autoSwitchTitle: string;
+  autoSwitchSub: string;
+  autoSwitchOn: string;
+  autoSwitchOnDesc: string;
+  autoSwitchOff: string;
+  autoSwitchOffDesc: string;
+  autoSwitchThresholdSuffix: string;
+  autoSwitchThresholdDescTemplate: string;
+  autoSwitchAnyNote: string;
+  autoSwitchToastSwitched: string;
   appPathTitle: string;
   appPathSub: string;
   appPathEmpty: string;
@@ -113,7 +136,7 @@ export interface DashboardCopy {
   resetUnknown: string;
 }
 
-export type DashboardMetricKey = "hourly" | "weekly" | "review";
+type DashboardMetricKey = "hourly" | "weekly" | "review";
 
 export interface DashboardMetricViewModel {
   key: DashboardMetricKey;
@@ -153,25 +176,36 @@ export interface DashboardState {
   accounts: DashboardAccountViewModel[];
 }
 
-export type DashboardHostMessage = {
-  type: "dashboard:snapshot";
-  state: DashboardState;
-};
+export type DashboardActionName =
+  | "addAccount"
+  | "importCurrent"
+  | "refreshAll"
+  | "refreshView"
+  | "details"
+  | "switch"
+  | "refresh"
+  | "remove"
+  | "toggleStatusBar";
+
+export type DashboardHostMessage =
+  | {
+      type: "dashboard:snapshot";
+      state: DashboardState;
+    }
+  | {
+      type: "dashboard:action-result";
+      requestId: string;
+      action: DashboardActionName;
+      accountId?: string;
+      status: "completed" | "failed";
+    };
 
 export type DashboardClientMessage =
   | { type: "dashboard:ready" }
   | {
       type: "dashboard:action";
-      action:
-        | "addAccount"
-        | "importCurrent"
-        | "refreshAll"
-        | "refreshView"
-        | "details"
-        | "switch"
-        | "refresh"
-        | "remove"
-        | "toggleStatusBar";
+      requestId: string;
+      action: DashboardActionName;
       accountId?: string;
     }
   | {

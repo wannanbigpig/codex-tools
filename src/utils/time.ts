@@ -7,7 +7,8 @@
  * - 改进代码组织
  */
 
-import { translate } from "./i18n";
+import { getIntlLocale } from "../localization/languages";
+import { getLanguage, translate } from "./i18n";
 
 /**
  * 格式化相对重置时间
@@ -54,7 +55,7 @@ export function formatTimestamp(epochMs?: number): string {
   if (!epochMs) {
     return translate("common.never");
   }
-  return new Date(epochMs).toLocaleString();
+  return new Date(epochMs).toLocaleString(getIntlLocale(getLanguage()));
 }
 
 /**

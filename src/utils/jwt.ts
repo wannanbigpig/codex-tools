@@ -92,7 +92,7 @@ export function extractClaims(idToken: string, accessToken?: string): DecodedAut
  * @param token - JWT 令牌
  * @returns 过期时间戳，如果不存在则返回 undefined
  */
-export function getTokenExpiryEpochSeconds(token: string): number | undefined {
+function getTokenExpiryEpochSeconds(token: string): number | undefined {
   const payload = decodeJwtPayload(token);
   const expValue = payload["exp"];
   return typeof expValue === "number" ? expValue : undefined;

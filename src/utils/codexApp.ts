@@ -57,7 +57,7 @@ export async function getCodexAppState(): Promise<{
   running: boolean;
   launcherPath?: string;
 }> {
-  const launcherPath = await findInstalledCodexApp();
+  const launcherPath = await resolveCodexAppLaunchPath();
   if (!launcherPath) {
     return { installed: false, running: false };
   }
@@ -66,8 +66,9 @@ export async function getCodexAppState(): Promise<{
   return { installed: true, running, launcherPath };
 }
 
-async function findInstalledCodexApp(): Promise<string | undefined> {
-  const customPath = vscode.workspace.getConfiguration("codexAccounts").get<string>("codexAppPath")?.trim();
+export async function resolveCodexAppLaunchPath(customPathInput?: string): Promise<string | undefined> {
+  const customPath =
+    customPathInput?.trim() ?? vscode.workspace.getConfiguration("codexAccounts").get<string>("codexAppPath")?.trim();
   if (customPath) {
     try {
       await fs.access(customPath);

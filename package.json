@@ -33,15 +33,34 @@
           "default": "manual",
           "markdownDescription": "How to handle Codex App restart when switching accounts and the desktop app is already running. `auto` restarts it automatically, `manual` asks you to click restart each time."
         },
+        "codexAccounts.codexAppRestartEnabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Whether codex-tools should manage Codex App when switching accounts. Turn this off to skip restart prompts and app handling entirely."
+        },
         "codexAccounts.displayLanguage": {
           "type": "string",
           "enum": [
             "auto",
+            "en",
             "zh",
-            "en"
+            "ja",
+            "es",
+            "de",
+            "fr",
+            "pt-br",
+            "ru",
+            "ko",
+            "it",
+            "zh-hant",
+            "tr",
+            "pl",
+            "cs",
+            "ar",
+            "vi"
           ],
           "default": "auto",
-          "markdownDescription": "Language used by codex-tools. `auto` follows the current VS Code display language, `zh` forces Simplified Chinese, and `en` forces English."
+          "markdownDescription": "Language used by codex-tools. `auto` follows the current VS Code display language. Dashboard, details, and core notifications use localized copy when available and fall back to English for any missing edge-case strings."
         },
         "codexAccounts.autoRefreshMinutes": {
           "type": "number",
@@ -56,6 +75,25 @@
           "default": 0,
           "markdownDescription": "Automatically refresh saved account quotas every N minutes. Set to `0` to disable."
         },
+        "codexAccounts.autoSwitchEnabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Automatically switch away from the active account when its quota falls below the configured hourly or weekly threshold."
+        },
+        "codexAccounts.autoSwitchHourlyThreshold": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 20,
+          "markdownDescription": "Automatic account switching threshold for the 5-hour quota. Switching is triggered when the active account drops to or below this percentage."
+        },
+        "codexAccounts.autoSwitchWeeklyThreshold": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 20,
+          "markdownDescription": "Automatic account switching threshold for the weekly quota. Switching is triggered when the active account drops to or below this percentage."
+        },
         "codexAccounts.codexAppPath": {
           "type": "string",
           "default": "",
@@ -68,18 +106,13 @@
         },
         "codexAccounts.quotaWarningEnabled": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "markdownDescription": "Show a warning notification when the active account quota drops below the configured threshold."
         },
         "codexAccounts.quotaWarningThreshold": {
           "type": "number",
-          "enum": [
-            10,
-            20,
-            30,
-            40,
-            50
-          ],
+          "minimum": 5,
+          "maximum": 90,
           "default": 20,
           "markdownDescription": "Quota warning threshold percentage for the active account."
         },
@@ -173,11 +206,9 @@
     "@typescript-eslint/parser": "^7.0.0",
     "@vscode/vsce": "^3.2.1",
     "eslint": "^8.57.0",
+    "preact": "^10.29.0",
     "prettier": "^3.2.5",
     "typescript": "^5.7.2",
     "vite": "^6.4.1"
-  },
-  "dependencies": {
-    "preact": "^10.29.0"
   }
 }

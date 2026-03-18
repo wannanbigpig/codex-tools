@@ -33,7 +33,7 @@ export class AccountsWorkbench {
     registerCommands(this.context, this.repo, refreshers);
     this.registerAuthFileWatcher(refreshers);
     this.registerAutoRefreshScheduler();
-    await this.promptImportLocalAccountIfNeeded(refreshers);
+    await this.promptImportCurrentAccountIfNeeded(refreshers);
     await this.statusBar.refresh();
   }
 
@@ -41,12 +41,16 @@ export class AccountsWorkbench {
     this.repo.dispose();
   }
 
-  private async promptImportLocalAccountIfNeeded(view: { refresh(): void }): Promise<void> {
+  private async promptImportCurrentAccountIfNeeded(view: { refresh(): void }): Promise<void> {
     const accounts = await this.repo.listAccounts();
-    if (accounts.length > 0) {
+    if (accounts.length > 0 && accounts.some((account) => account.isActive)) {
       return;
     }
 
+    await this.promptImportCurrentAccount(view);
+  }
+
+  private async promptImportCurrentAccount(view: { refresh(): void }): Promise<void> {
     const auth = await readAuthFile();
     if (!auth?.tokens?.id_token || !auth.tokens.access_token) {
       return;
@@ -137,14 +141,24 @@ export class AccountsWorkbench {
     const afterAccounts = await this.repo.listAccounts();
     const nextActive = afterAccounts.find((account) => account.isActive);
 
-    if (!nextActive || nextActive.id === previousActive?.id || isVisible()) {
+    if (isVisible()) {
       return;
     }
 
-    const copy = getExternalAuthSyncCopy();
-    markVisible();
-
     try {
+      if (!nextActive && afterAccounts.length > 0) {
+        markVisible();
+        await this.promptImportCurrentAccount(view);
+        return;
+      }
+
+      if (!nextActive || nextActive.id === previousActive?.id) {
+        return;
+      }
+
+      const copy = getExternalAuthSyncCopy();
+      markVisible();
+
       const choice = await vscode.window.showInformationMessage(
         copy.message(nextActive.accountName ?? nextActive.email),
         copy.reloadNow,
@@ -173,9 +187,12 @@ export class AccountsWorkbench {
         return;
       }
 
-      timer = setInterval(() => {
-        void vscode.commands.executeCommand("codexAccounts.refreshAllQuotas", { silent: true });
-      }, minutes * 60 * 1000);
+      timer = setInterval(
+        () => {
+          void vscode.commands.executeCommand("codexAccounts.refreshAllQuotas", { silent: true });
+        },
+        minutes * 60 * 1000
+      );
     };
 
     applySchedule();

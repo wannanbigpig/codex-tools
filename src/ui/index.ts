@@ -3,5 +3,4 @@
  */
 
 export * from "./details";
-export * from "./quotaSummary";
 export * from "./statusBar";

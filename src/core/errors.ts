@@ -315,33 +315,6 @@ export const createError = {
 };
 
 /**
- * 类型守卫 - 判断错误类型
- */
-export function isAppError(error: unknown): error is AppError {
-  return error instanceof AppError;
-}
-
-export function isAuthError(error: unknown): error is AuthError {
-  return error instanceof AuthError;
-}
-
-export function isTokenExpiredError(error: unknown): error is TokenExpiredError {
-  return error instanceof TokenExpiredError;
-}
-
-export function isAccountError(error: unknown): error is AccountError {
-  return error instanceof AccountError;
-}
-
-export function isNetworkError(error: unknown): error is NetworkError {
-  return error instanceof NetworkError;
-}
-
-export function isAPIError(error: unknown): error is APIError {
-  return error instanceof APIError;
-}
-
-/**
  * 安全地提取错误消息
  */
 export function getErrorMessage(error: unknown): string {
@@ -352,18 +325,4 @@ export function getErrorMessage(error: unknown): string {
     return error;
   }
   return String(error);
-}
-
-/**
- * 将未知错误转换为 AppError
- * 用于统一的错误处理流程
- */
-export function toAppError(error: unknown): AppError {
-  if (error instanceof AppError) {
-    return error;
-  }
-  if (error instanceof Error) {
-    return new AppError(error.message, { cause: error });
-  }
-  return new AppError(String(error));
 }

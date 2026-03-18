@@ -150,8 +150,7 @@ function parseUsage(usage: CodexUsageResponse): CodexQuotaSummary {
     codeReviewPercentage: normalizeRemaining(codeReviewPrimary?.used_percent),
     codeReviewResetTime: normalizeReset(codeReviewPrimary?.reset_at, codeReviewPrimary?.reset_after_seconds),
     codeReviewWindowMinutes: normalizeWindow(codeReviewPrimary?.limit_window_seconds),
-    codeReviewWindowPresent: Boolean(codeReviewPrimary),
-    rawData: usage
+    codeReviewWindowPresent: Boolean(codeReviewPrimary)
   };
 }
 

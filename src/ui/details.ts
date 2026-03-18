@@ -1,5 +1,8 @@
 import * as vscode from "vscode";
 import { CodexAccountRecord, CodexDailyUsageBreakdown, CodexDailyUsagePoint } from "../core/types";
+import type { DashboardLanguage } from "../localization/languages";
+import { getIntlLocale } from "../localization/languages";
+import { detailCopyResources } from "../localization/resources/details";
 import { fetchDailyUsageBreakdown } from "../services";
 import { AccountsRepository } from "../storage";
 import { colorForPercentage, escapeHtml, escapeHtmlAttr, getLanguage, prettyAuthProvider } from "../utils";
@@ -84,11 +87,7 @@ export function openDetailsPanel(
   void hydrateUsage(repo, account.id, requestId);
 }
 
-async function hydrateUsage(
-  repo: AccountsRepository,
-  accountId: string,
-  requestId: number
-): Promise<void> {
+async function hydrateUsage(repo: AccountsRepository, accountId: string, requestId: number): Promise<void> {
   try {
     const tokens = await repo.getTokens(accountId);
     if (!tokens || !detailsPanel || requestId !== detailsPanelRequestId || detailsPanelState.accountId !== accountId) {
@@ -156,6 +155,8 @@ type WebviewScripts = {
   page: string;
 };
 
+type SensitiveKind = "email" | "id" | "name";
+
 function renderHtml(
   account: CodexAccountRecord,
   copy: DetailCopy,
@@ -169,7 +170,7 @@ function renderHtml(
   const quota = account.quotaSummary;
   const accountStatus = account.isActive ? copy.currentlyActive : copy.savedAccount;
   const provider = prettyAuthProvider(account.authProvider);
-  const identityName = account.displayName?.trim() ?? account.accountName?.trim() ?? account.email;
+  const identityName = account.accountName?.trim() ?? account.email;
 
   return `<!DOCTYPE html>
 <html lang="${copy.lang}">
@@ -185,8 +186,23 @@ function renderHtml(
       <div class="panel-inner hero">
         <div class="hero-top">
           <div class="hero-title">
-            <h1>${escapeHtml(identityName)}</h1>
-            <div class="meta">${escapeHtml(account.email)}</div>
+            <div class="hero-title-row">
+              <h1>${renderSensitiveHtml(identityName, "name")}</h1>
+              <button
+                class="privacy-toggle"
+                type="button"
+                aria-pressed="false"
+                aria-label="${escapeHtmlAttr(copy.hideSensitive)}"
+                title="${escapeHtmlAttr(copy.hideSensitive)}"
+                data-role="privacy-toggle"
+                data-show-label="${escapeHtmlAttr(copy.showSensitive)}"
+                data-hide-label="${escapeHtmlAttr(copy.hideSensitive)}"
+              >
+                <span class="privacy-icon privacy-icon-show">${renderEyeSvg()}</span>
+                <span class="privacy-icon privacy-icon-hide">${renderEyeOffSvg()}</span>
+              </button>
+            </div>
+            <div class="meta">${renderSensitiveHtml(account.email, "email")}</div>
             <div class="meta">${escapeHtml(copy.detailsSubtitle)}</div>
           </div>
           <div class="badges">
@@ -195,10 +211,10 @@ function renderHtml(
           </div>
         </div>
         <div class="summary">
-          <div class="meta"><strong>${escapeHtml(copy.teamName)}:</strong> ${escapeHtml(account.accountName ?? "-")}</div>
+          <div class="meta"><strong>${escapeHtml(copy.teamName)}:</strong> ${renderSensitiveHtml(account.accountName, "name", "-")}</div>
           <div class="meta"><strong>${escapeHtml(copy.login)}:</strong> ${escapeHtml(provider)}</div>
           <div class="meta"><strong>${escapeHtml(copy.loginTime)}:</strong> ${renderLiveTimestamp(account.loginAt, copy)}</div>
-          <div class="meta"><strong>${escapeHtml(copy.userId)}:</strong> ${escapeHtml(account.userId ?? account.accountId ?? "-")}</div>
+          <div class="meta"><strong>${escapeHtml(copy.userId)}:</strong> ${renderSensitiveHtml(account.userId ?? account.accountId, "id", "-")}</div>
           <div class="meta"><strong>${escapeHtml(copy.status)}:</strong> ${escapeHtml(accountStatus)}</div>
         </div>
       </div>
@@ -239,11 +255,11 @@ function renderHtml(
       <div class="meta-grid">
         <div class="meta-box">
           <div class="label">${escapeHtml(copy.accountId)}</div>
-          <div class="content">${escapeHtml(account.accountId ?? "-")}</div>
+          <div class="content">${renderSensitiveHtml(account.accountId, "id", "-")}</div>
         </div>
         <div class="meta-box">
           <div class="label">${escapeHtml(copy.organizationId)}</div>
-          <div class="content">${escapeHtml(account.organizationId ?? "-")}</div>
+          <div class="content">${renderSensitiveHtml(account.organizationId, "id", "-")}</div>
         </div>
         <div class="meta-box">
           <div class="label">${escapeHtml(copy.lastQuotaRefresh)}</div>
@@ -262,11 +278,7 @@ function renderHtml(
 </html>`;
 }
 
-function getWebviewStyles(
-  webview: vscode.Webview,
-  extensionUri: vscode.Uri,
-  pageStylesheet: string
-): WebviewStyles {
+function getWebviewStyles(webview: vscode.Webview, extensionUri: vscode.Uri, pageStylesheet: string): WebviewStyles {
   const shared = vscode.Uri.joinPath(extensionUri, "media", "webview", "shared.css");
   const page = vscode.Uri.joinPath(extensionUri, "media", "webview", pageStylesheet);
   return {
@@ -275,11 +287,7 @@ function getWebviewStyles(
   };
 }
 
-function getWebviewScripts(
-  webview: vscode.Webview,
-  extensionUri: vscode.Uri,
-  pageScript: string
-): WebviewScripts {
+function getWebviewScripts(webview: vscode.Webview, extensionUri: vscode.Uri, pageScript: string): WebviewScripts {
   const page = vscode.Uri.joinPath(extensionUri, "media", "webview", pageScript);
   return {
     page: webview.asWebviewUri(page).toString()
@@ -363,15 +371,63 @@ function renderLiveTimestamp(epochMs: number | undefined, copy: DetailCopy): str
   return `<span class="live-timestamp" data-epoch-ms="${epochMs}" data-never="${escapeHtml(copy.never)}">${escapeHtml(formatTimestamp(epochMs))}</span>`;
 }
 
-function formatUsageDate(input: string, lang: "zh" | "en"): string {
+function renderSensitiveHtml(value: string | undefined, kind: SensitiveKind, fallback = "—"): string {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return escapeHtml(fallback);
+  }
+
+  return `<span class="privacy-sensitive"><span class="privacy-sensitive-raw">${escapeHtml(normalized)}</span><span class="privacy-sensitive-masked">${escapeHtml(maskSensitiveValue(normalized, kind))}</span></span>`;
+}
+
+function maskSensitiveValue(value: string, kind: SensitiveKind): string {
+  switch (kind) {
+    case "email":
+      return maskEmail(value);
+    case "name":
+      return maskSegmentedValue(value);
+    case "id":
+      return createMask(value.length, 10, 18);
+    default:
+      return createMask(value.length);
+  }
+}
+
+function maskEmail(value: string): string {
+  const [localPart, domainPart] = value.split("@");
+  if (!localPart || !domainPart) {
+    return createMask(value.length);
+  }
+
+  return `${createMask(localPart.length, 4, 10)}@${createMask(domainPart.length, 4, 10)}`;
+}
+
+function maskSegmentedValue(value: string): string {
+  return value
+    .split(/(\s+|[._\-\\/]+)/)
+    .map((segment) => (/^(\s+|[._\-\\/]+)$/.test(segment) ? segment : createMask(segment.length, 3, 8)))
+    .join("");
+}
+
+function createMask(length: number, min = 6, max = 12): string {
+  return "*".repeat(Math.max(min, Math.min(max, Math.max(1, length))));
+}
+
+function renderEyeSvg(): string {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1.5 12s3.8-6 10.5-6 10.5 6 10.5 6-3.8 6-10.5 6S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"></circle></svg>`;
+}
+
+function renderEyeOffSvg(): string {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path><path d="M10.6 5.7A12.6 12.6 0 0 1 12 5.6c6.7 0 10.5 6.4 10.5 6.4a18.4 18.4 0 0 1-4 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path><path d="M6.2 7.2A18.8 18.8 0 0 0 1.5 12s3.8 6 10.5 6c1.6 0 3-.3 4.3-.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path><path d="M9.9 9.8A3.2 3.2 0 0 0 14.2 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
+}
+
+function formatUsageDate(input: string, lang: DashboardLanguage): string {
   const date = new Date(input);
   if (Number.isNaN(date.getTime())) {
     return input;
   }
 
-  return lang === "zh"
-    ? new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(date)
-    : new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
+  return new Intl.DateTimeFormat(getIntlLocale(lang), { month: "short", day: "numeric" }).format(date);
 }
 
 function collectVisibleSurfaceKeys(points: CodexDailyUsagePoint[]): string[] {
@@ -386,12 +442,15 @@ function collectVisibleSurfaceKeys(points: CodexDailyUsagePoint[]): string[] {
     }
   }
 
-  return [...totals.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([key]) => key);
+  return [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => key);
 }
 
-function renderUsageSegments(point: CodexDailyUsagePoint, surfaceKeys: string[], totalValue: number, copy: DetailCopy): string {
+function renderUsageSegments(
+  point: CodexDailyUsagePoint,
+  surfaceKeys: string[],
+  totalValue: number,
+  copy: DetailCopy
+): string {
   if (!surfaceKeys.length || totalValue <= 0) {
     return `<div class="usage-segment usage-segment-empty" style="height:100%;"></div>`;
   }
@@ -457,11 +516,13 @@ function formatSurfaceLabel(key: string): string {
 }
 
 type DetailCopy = {
-  lang: "zh" | "en";
+  lang: DashboardLanguage;
   titlePrefix: string;
   detailsSubtitle: string;
   current: string;
   saved: string;
+  showSensitive: string;
+  hideSensitive: string;
   currentlyActive: string;
   savedAccount: string;
   teamName: string;
@@ -491,73 +552,14 @@ type DetailCopy = {
 
 function getCopy(): DetailCopy {
   const lang = getLanguage();
-  if (lang === "zh") {
-    return {
-      lang,
-      titlePrefix: "Codex",
-      detailsSubtitle: "账号详情与使用情况",
-      current: "当前",
-      saved: "已保存",
-      currentlyActive: "当前激活",
-      savedAccount: "已保存账号",
-      teamName: "团队空间",
-      login: "登录方式",
-      loginTime: "登录时间",
-      userId: "用户 ID",
-      status: "状态",
-      hourlyQuota: "5小时配额",
-      weeklyQuota: "每周配额",
-      reviewQuota: "代码审查配额",
-      reset: "重置",
-      usageTitle: "使用详情",
-      usageHint: "使用数据为近似值，可能延迟更新。",
-      usageSubtitle: "个人使用",
-      usageLoading: "正在加载每日使用情况...",
-      usageEmpty: "在此期间无数据",
-      usageError: "每日使用情况加载失败。",
-      rangeLabel: (days) => `最近 ${days} 天`,
-      usageValueLabel: (value, total) =>
-        `${((value / Math.max(total, 1)) * 100).toLocaleString("zh-CN", { maximumFractionDigits: 0 })}%`,
-      metadata: "元数据",
-      accountId: "账号 ID",
-      organizationId: "组织 ID",
-      lastQuotaRefresh: "最近刷新",
-      resetUnknown: "重置时间未知",
-      never: "从未"
-    };
-  }
-
+  const resource = detailCopyResources[lang];
   return {
     lang,
-    titlePrefix: "Codex",
-    detailsSubtitle: "Account details and usage view",
-    current: "Current",
-    saved: "Saved",
-    currentlyActive: "Currently active",
-    savedAccount: "Saved account",
-    teamName: "Team Name",
-    login: "Login",
-    loginTime: "Login Time",
-    userId: "User ID",
-    status: "Status",
-    hourlyQuota: "Hourly quota",
-    weeklyQuota: "Weekly quota",
-    reviewQuota: "Code review quota",
-    reset: "Reset",
-    usageTitle: "Usage details",
-    usageHint: "Usage data is approximate and may be delayed.",
-    usageSubtitle: "Personal usage",
-    usageLoading: "Loading daily usage...",
-    usageEmpty: "No data available for this period",
-    usageError: "Failed to load daily usage.",
-    rangeLabel: (days) => `Last ${days} days`,
+    ...resource,
+    rangeLabel: (days) => resource.rangeLabelTemplate.replace("{days}", String(days)),
     usageValueLabel: (value, total) =>
-      `${((value / Math.max(total, 1)) * 100).toLocaleString("en-US", { maximumFractionDigits: 0 })}%`,
-    metadata: "Metadata",
-    accountId: "Account ID",
-    organizationId: "Organization ID",
-    lastQuotaRefresh: "Last quota refresh",
-    resetUnknown: "reset unknown",
-    never: "never"
+      `${((value / Math.max(total, 1)) * 100).toLocaleString(getIntlLocale(lang), {
+        maximumFractionDigits: 0
+      })}%`
   };
 }

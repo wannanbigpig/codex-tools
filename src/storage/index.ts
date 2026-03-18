@@ -3,4 +3,3 @@
  */
 
 export * from "./accounts";
-export * from "./secrets";
