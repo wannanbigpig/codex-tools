@@ -2,7 +2,7 @@
   "name": "codex-accounts-manager",
   "displayName": "Codex Accounts Manager",
   "description": "Manage multiple Codex accounts in VS Code, inspect quota, and switch the active global auth.json.",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "publisher": "wannanbigpig",
   "icon": "media/CT_logo_transparent_square_hd.png",
   "license": "MIT",
@@ -36,7 +36,7 @@
         "codexAccounts.codexAppRestartEnabled": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Whether codex-tools should manage Codex App when switching accounts. Turn this off to skip restart prompts and app handling entirely."
+          "markdownDescription": "Whether Codex Accounts Manager should manage Codex App when switching accounts. Turn this off to skip restart prompts and app handling entirely."
         },
         "codexAccounts.displayLanguage": {
           "type": "string",
@@ -60,7 +60,7 @@
             "vi"
           ],
           "default": "auto",
-          "markdownDescription": "Language used by codex-tools. `auto` follows the current VS Code display language. Dashboard, details, and core notifications use localized copy when available and fall back to English for any missing edge-case strings."
+          "markdownDescription": "Language used by Codex Accounts Manager. `auto` follows the current VS Code display language. Dashboard, details, and core notifications use localized copy when available and fall back to English for any missing edge-case strings."
         },
         "codexAccounts.autoRefreshMinutes": {
           "type": "number",
@@ -143,7 +143,7 @@
         "codexAccounts.debugNetwork": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Enable sanitized network debug logs for codex-tools requests in the `Codex Accounts Network` output channel."
+          "markdownDescription": "Enable sanitized network debug logs for Codex Accounts Manager requests in the `Codex Accounts Network` output channel."
         }
       }
     },

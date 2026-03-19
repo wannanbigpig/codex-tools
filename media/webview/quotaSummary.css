@@ -249,6 +249,28 @@ body {
 .refresh-view-btn {
   font-size: 16px;
 }
+.refresh-view-btn .button-face {
+  position: relative;
+  width: 16px;
+  height: 16px;
+}
+.refresh-view-btn .button-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  line-height: 1;
+}
+.refresh-view-btn .button-spinner {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin-left: -5.5px;
+  margin-top: -5.5px;
+}
+.refresh-view-btn.is-pending .button-label {
+  opacity: 0;
+}
 .toolbar {
   display: grid;
   grid-template-columns: 1fr;

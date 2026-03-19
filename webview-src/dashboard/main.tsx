@@ -1,6 +1,6 @@
 import { render } from "preact";
 import type { ComponentChildren } from "preact";
-import { useEffect, useReducer } from "preact/hooks";
+import { useEffect, useReducer, useRef } from "preact/hooks";
 import type {
   DashboardAccountViewModel,
   DashboardActionName,
@@ -31,6 +31,7 @@ type PendingActionRequest = {
   requestId: string;
   action: DashboardActionName;
   accountId?: string;
+  requestedAt: number;
 };
 
 type AppState = {
@@ -57,9 +58,11 @@ const vscodeApi =
     ? acquireVsCodeApi()
     : {
         postMessage(message: DashboardClientMessage): void {
-          console.debug("[codex-tools] dashboard message", message);
+          console.debug("[codex-accounts-manager] dashboard message", message);
         }
       };
+
+const BLOCKING_GLOBAL_ACTIONS = new Set<DashboardActionName>(["addAccount", "importCurrent", "refreshAll"]);
 
 function createInitialState(): AppState {
   return {
@@ -142,6 +145,7 @@ function reducer(state: AppState, action: AppAction): AppState {
 
 function App() {
   const [state, dispatch] = useReducer(reducer, undefined, createInitialState);
+  const actionTimeoutsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     const onMessage = (event: MessageEvent<DashboardHostMessage>) => {
@@ -187,6 +191,40 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const activeRequestIds = new Set(state.pendingActions.map((request) => request.requestId));
+
+    state.pendingActions.forEach((request) => {
+      if (actionTimeoutsRef.current.has(request.requestId)) {
+        return;
+      }
+
+      const timeoutId = window.setTimeout(() => {
+        dispatch({ type: "resolve-action", requestId: request.requestId });
+      }, getActionTimeoutMs(request.action));
+
+      actionTimeoutsRef.current.set(request.requestId, timeoutId);
+    });
+
+    actionTimeoutsRef.current.forEach((timeoutId, requestId) => {
+      if (activeRequestIds.has(requestId)) {
+        return;
+      }
+
+      window.clearTimeout(timeoutId);
+      actionTimeoutsRef.current.delete(requestId);
+    });
+  }, [state.pendingActions]);
+
+  useEffect(() => {
+    return () => {
+      actionTimeoutsRef.current.forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
+      });
+      actionTimeoutsRef.current.clear();
+    };
+  }, []);
+
   const snapshot = state.snapshot;
   if (!snapshot) {
     return (
@@ -211,7 +249,8 @@ function App() {
       request: {
         requestId,
         action,
-        accountId
+        accountId,
+        requestedAt: Date.now()
       }
     });
     postMessageToHost({
@@ -270,7 +309,9 @@ function App() {
   const isActionPending = (action: DashboardActionName, accountId?: string): boolean =>
     state.pendingActions.some((request) => request.action === action && request.accountId === accountId);
 
-  const hasGlobalPendingAction = state.pendingActions.some((request) => request.accountId == null);
+  const hasGlobalPendingAction = state.pendingActions.some(
+    (request) => request.accountId == null && BLOCKING_GLOBAL_ACTIONS.has(request.action)
+  );
   const isAccountBusy = (accountId: string): boolean =>
     hasGlobalPendingAction || state.pendingActions.some((request) => request.accountId === accountId);
   const privacyToggleLabel = state.privacyMode ? snapshot.copy.showSensitive : snapshot.copy.hideSensitive;
@@ -281,9 +322,9 @@ function App() {
         <section class="section">
           <div class="hero">
             <div class="brand">
-              <img class="logo" src={snapshot.logoUri} alt="Codex Tools logo" />
+              <img class="logo" src={snapshot.logoUri} alt="Codex Accounts Manager logo" />
               <div>
-                <h1>codex-tools</h1>
+                <h1>Codex Accounts Manager</h1>
                 <p>{snapshot.brandSub}</p>
               </div>
             </div>
@@ -305,7 +346,7 @@ function App() {
                 type="button"
                 title={snapshot.copy.refreshPage}
                 aria-label={snapshot.copy.refreshPage}
-                disabled={hasGlobalPendingAction}
+                disabled={hasGlobalPendingAction || isActionPending("refreshView")}
                 aria-busy={isActionPending("refreshView")}
                 onClick={() => sendAction("refreshView")}
               >
@@ -1468,6 +1509,26 @@ function pickSparseScaleValues(values: number[]): number[] {
 }
 
 let actionRequestSequence = 0;
+
+function getActionTimeoutMs(action: DashboardActionName): number {
+  switch (action) {
+    case "refreshView":
+      return 8_000;
+    case "details":
+    case "switch":
+    case "refresh":
+    case "remove":
+    case "toggleStatusBar":
+      return 30_000;
+    case "refreshAll":
+      return 120_000;
+    case "addAccount":
+    case "importCurrent":
+      return 300_000;
+    default:
+      return 30_000;
+  }
+}
 
 function createActionRequestId(): string {
   actionRequestSequence += 1;

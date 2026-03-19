@@ -15,7 +15,7 @@ export class AccountsStatusBarProvider {
     private readonly repo: AccountsRepository
   ) {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    this.item.name = "Codex Tools Quota";
+    this.item.name = "Codex Accounts Manager Quota";
     this.item.command = "codexAccounts.showQuotaSummary";
     this.context.subscriptions.push(
       this.item,
@@ -38,7 +38,7 @@ export class AccountsStatusBarProvider {
     const _t = t();
 
     if (!active) {
-      this.item.text = `${STATUS_BAR_ICON} codex-tools`;
+      this.item.text = `${STATUS_BAR_ICON} Codex Accounts Manager`;
       const md = new vscode.MarkdownString(undefined, true);
       md.isTrusted = true;
       md.appendMarkdown(`**${_t("panel.dashboard.title")}**\n\n`);
@@ -60,7 +60,7 @@ function buildStatusText(account: CodexAccountRecord): string {
   if (typeof hourly === "number" && typeof weekly === "number") {
     return `${STATUS_BAR_ICON} codex ${hourly}%/${weekly}%`;
   }
-  return `${STATUS_BAR_ICON} codex-tools`;
+  return `${STATUS_BAR_ICON} Codex Accounts Manager`;
 }
 
 function buildTooltip(active: CodexAccountRecord, accounts: CodexAccountRecord[]): vscode.MarkdownString {

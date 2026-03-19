@@ -186,7 +186,7 @@ class DashboardPanelController {
     status: Extract<DashboardHostMessage, { type: "dashboard:action-result" }>["status"],
     accountId?: string
   ): Promise<void> {
-    if (!this.panel || !this.webviewReady) {
+    if (!this.panel) {
       return;
     }
 
