@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { CodexAccountRecord, CodexDailyUsageBreakdown, CodexDailyUsagePoint } from "../core/types";
+import { formatAccountStructure } from "../application/dashboard/copy";
 import type { DashboardLanguage } from "../localization/languages";
 import { getIntlLocale } from "../localization/languages";
 import { detailCopyResources } from "../localization/resources/details";
@@ -173,6 +174,7 @@ function renderHtml(
   const accountStatus = account.isActive ? copy.currentlyActive : copy.savedAccount;
   const provider = prettyAuthProvider(account.authProvider);
   const identityName = account.accountName?.trim() ?? account.email;
+  const workspaceLabel = formatAccountStructure(account.accountStructure, copy.lang);
 
   return `<!DOCTYPE html>
 <html lang="${copy.lang}">
@@ -213,7 +215,7 @@ function renderHtml(
           </div>
         </div>
         <div class="summary">
-          <div class="meta"><strong>${escapeHtml(copy.teamName)}:</strong> ${renderSensitiveHtml(account.accountName, "name", "-")}</div>
+          <div class="meta"><strong>${escapeHtml(workspaceLabel)}:</strong> ${renderSensitiveHtml(account.accountName, "name", "-")}</div>
           <div class="meta"><strong>${escapeHtml(copy.login)}:</strong> ${escapeHtml(provider)}</div>
           <div class="meta"><strong>${escapeHtml(copy.loginTime)}:</strong> ${renderLiveTimestamp(account.loginAt, copy)}</div>
           <div class="meta"><strong>${escapeHtml(copy.userId)}:</strong> ${renderSensitiveHtml(account.userId ?? account.accountId, "id", "-")}</div>

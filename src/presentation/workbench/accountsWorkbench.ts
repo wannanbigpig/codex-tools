@@ -7,10 +7,13 @@ import { refreshQuotaSummaryPanel } from "../dashboard";
 import { AccountsStatusBarProvider, refreshDetailsPanel } from "../../ui";
 import { getExternalAuthSyncCopy, getLocalAccountCopy, registerDebugOutput } from "../../utils";
 import { getErrorMessage } from "../../core";
+import { readCurrentAuthAccountStorageId } from "../../utils/accountIdentity";
+import { setCurrentWindowRuntimeAccountId } from "./windowRuntimeAccount";
 
 export class AccountsWorkbench {
   private readonly repo: AccountsRepository;
   private readonly statusBar: AccountsStatusBarProvider;
+  private lastObservedAuthIdentity?: string;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.repo = new AccountsRepository(context);
@@ -20,6 +23,8 @@ export class AccountsWorkbench {
   async activate(): Promise<void> {
     registerDebugOutput(this.context);
     await this.repo.init();
+    this.lastObservedAuthIdentity = await this.readObservedAuthIdentity();
+    setCurrentWindowRuntimeAccountId(this.lastObservedAuthIdentity);
     this.context.subscriptions.push({ dispose: () => this.repo.dispose() });
 
     const refreshers = {
@@ -27,6 +32,9 @@ export class AccountsWorkbench {
         void this.statusBar.refresh();
         void refreshDetailsPanel();
         void refreshQuotaSummaryPanel();
+      },
+      markObservedAuthIdentity: (accountId?: string): void => {
+        this.lastObservedAuthIdentity = accountId;
       }
     };
 
@@ -71,6 +79,7 @@ export class AccountsWorkbench {
         },
         async () => {
           const account = await this.repo.importCurrentAuth();
+          this.lastObservedAuthIdentity = account.id;
           const result = await refreshImportedAccountQuota(this.repo, account.id);
           view.refresh();
 
@@ -132,8 +141,9 @@ export class AccountsWorkbench {
     markHidden: () => void,
     isVisible: () => boolean
   ): Promise<void> {
-    const beforeAccounts = await this.repo.listAccounts();
-    const previousActive = beforeAccounts.find((account) => account.isActive);
+    const previousObservedIdentity = this.lastObservedAuthIdentity;
+    const nextObservedIdentity = await this.readObservedAuthIdentity();
+    this.lastObservedAuthIdentity = nextObservedIdentity;
 
     await this.repo.syncActiveAccountFromAuthFile();
     view.refresh();
@@ -147,12 +157,15 @@ export class AccountsWorkbench {
 
     try {
       if (!nextActive && afterAccounts.length > 0) {
+        if (previousObservedIdentity === nextObservedIdentity) {
+          return;
+        }
         markVisible();
         await this.promptImportCurrentAccount(view);
         return;
       }
 
-      if (!nextActive || nextActive.id === previousActive?.id) {
+      if (!nextActive || previousObservedIdentity === nextObservedIdentity) {
         return;
       }
 
@@ -171,6 +184,10 @@ export class AccountsWorkbench {
     } finally {
       markHidden();
     }
+  }
+
+  private async readObservedAuthIdentity(): Promise<string | undefined> {
+    return readCurrentAuthAccountStorageId();
   }
 
   private registerAutoRefreshScheduler(): void {

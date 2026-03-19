@@ -10,7 +10,7 @@ import { AccountsRepository } from "../storage";
 export function registerCommands(
   context: vscode.ExtensionContext,
   repo: AccountsRepository,
-  view: { refresh(): void }
+  view: { refresh(): void; markObservedAuthIdentity?: (accountId?: string) => void }
 ): void {
   const service = new AccountsCommandService(context, repo, view);
 

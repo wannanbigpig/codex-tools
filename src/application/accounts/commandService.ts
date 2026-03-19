@@ -109,6 +109,7 @@ export class AccountsCommandService {
     await this.withProgress(copy.progressSwitch(account.email), async () => {
       await this.repo.switchAccount(account.id);
     });
+    this.view.markObservedAuthIdentity?.(account.id);
 
     await this.handleCodexAppRestartPreference();
     this.view.refresh();

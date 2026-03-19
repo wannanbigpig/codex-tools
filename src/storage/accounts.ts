@@ -9,7 +9,6 @@
  * - 添加类型安全的缓存接口
  */
 
-import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
@@ -19,6 +18,7 @@ import { SecretStore } from "./secrets";
 import { readAuthFile, writeAuthFile } from "../codex";
 import { CodexAccountRecord, CodexAccountsIndex, CodexQuotaSummary, CodexTokens } from "../core/types";
 import { fetchRemoteAccountProfile } from "../services/profile";
+import { buildAccountStorageId } from "../utils/accountIdentity";
 import { extractClaims } from "../utils/jwt";
 import { AccountError, StorageError, createError, ErrorCode } from "../core/errors";
 
@@ -164,10 +164,14 @@ export class AccountsRepository {
     const id = buildAccountStorageId(claims.email, claims.accountId, claims.organizationId);
     const existing = index.accounts.find((item) => item.id === id);
     const now = Date.now();
+    const remoteAccountIdMatchesClaims = didRemoteAccountMatchClaims(remoteProfile, claims.accountId);
+    const remoteAccountName = remoteAccountIdMatchesClaims ? sanitizeWorkspaceName(remoteProfile?.accountName, claims.planType) : undefined;
+    const remoteAccountStructure = remoteAccountIdMatchesClaims ? remoteProfile?.accountStructure : undefined;
+    const claimsWorkspaceTitle = pickWorkspaceLikeTitle(claims.organizations?.map((item) => item.title), claims.planType);
     const resolvedAccountName =
-      sanitizeWorkspaceName(remoteProfile?.accountName, claims.planType) ??
-      pickWorkspaceLikeTitle(claims.organizations?.map((item) => item.title), claims.planType) ??
-      sanitizeWorkspaceName(existing?.accountName, claims.planType);
+      remoteAccountName ??
+      sanitizeWorkspaceName(existing?.accountName, claims.planType) ??
+      claimsWorkspaceTitle;
 
     const account: CodexAccountRecord = {
       id,
@@ -176,13 +180,15 @@ export class AccountsRepository {
       userId: claims.userId,
       authProvider: claims.authProvider,
       planType: claims.planType,
-      accountId: remoteProfile?.accountId ?? claims.accountId ?? tokens.accountId,
+      accountId: remoteAccountIdMatchesClaims ? remoteProfile?.accountId ?? claims.accountId ?? tokens.accountId : claims.accountId ?? tokens.accountId,
       organizationId: claims.organizationId,
       accountName: resolvedAccountName,
-      accountStructure:
-        remoteProfile?.accountStructure ??
-        inferAccountStructure(claims.planType, claims.organizationId) ??
+      accountStructure: resolveAccountStructure(
+        remoteAccountStructure,
         existing?.accountStructure,
+        claims.planType,
+        claims.organizationId
+      ),
       isActive: forceActive,
       showInStatusBar: existing?.showInStatusBar ?? shouldEnableStatusBarByDefault(index.accounts, id),
       lastQuotaAt: existing?.lastQuotaAt,
@@ -359,6 +365,8 @@ export class AccountsRepository {
     }
 
     const storedTokens = updatedTokens ?? (await this.secretStore.getTokens(accountId));
+    const previousStoredAccountId = storedTokens?.accountId;
+    const effectivePlanType = account.planType;
     if (!account.loginAt && storedTokens) {
       const effectiveTokens = storedTokens;
       if (effectiveTokens) {
@@ -367,10 +375,31 @@ export class AccountsRepository {
       }
     }
 
-    if (updatedTokens) {
+    if (storedTokens && shouldRepairWorkspaceMetadata(account, effectivePlanType)) {
+      const claims = extractClaims(storedTokens.idToken, storedTokens.accessToken);
+      const remoteProfile = await fetchRemoteAccountProfile(storedTokens).catch(() => undefined);
+      const claimsAccountId = claims.accountId ?? account.accountId;
+      if (didRemoteAccountMatchClaims(remoteProfile, claimsAccountId)) {
+        const repairedName = sanitizeWorkspaceName(remoteProfile?.accountName, effectivePlanType);
+        if (repairedName) {
+          account.accountName = repairedName;
+        }
+
+        account.accountId = remoteProfile?.accountId ?? claimsAccountId ?? account.accountId;
+        account.organizationId = claims.organizationId ?? account.organizationId;
+        account.accountStructure = resolveAccountStructure(
+          remoteProfile?.accountStructure,
+          account.accountStructure,
+          effectivePlanType,
+          account.organizationId
+        );
+      }
+    }
+
+    if (storedTokens && (updatedTokens || account.accountId !== previousStoredAccountId)) {
       await this.secretStore.setTokens(accountId, {
-        ...updatedTokens,
-        accountId: account.accountId ?? updatedTokens.accountId
+        ...storedTokens,
+        accountId: account.accountId ?? storedTokens.accountId
       });
     }
 
@@ -552,6 +581,51 @@ function inferAccountStructure(planType?: string, organizationId?: string): stri
   return "personal";
 }
 
+function resolveAccountStructure(
+  remoteAccountStructure: string | undefined,
+  existingAccountStructure: string | undefined,
+  planType?: string,
+  organizationId?: string
+): string | undefined {
+  if (remoteAccountStructure?.trim()) {
+    return remoteAccountStructure;
+  }
+
+  const inferred = inferAccountStructure(planType, organizationId);
+  if (!existingAccountStructure?.trim()) {
+    return inferred;
+  }
+
+  const existing = existingAccountStructure.trim().toLowerCase();
+  if (!inferred) {
+    return existing;
+  }
+
+  if (existing === "organization" || inferred === "organization") {
+    return inferred === "organization" ? inferred : existing;
+  }
+
+  if (isCollaborativeWorkspaceStructure(existing) || isCollaborativeWorkspaceStructure(inferred)) {
+    return isCollaborativeWorkspaceStructure(inferred) ? inferred : existing;
+  }
+
+  return existing;
+}
+
+function shouldRepairWorkspaceMetadata(account: CodexAccountRecord, planType?: string): boolean {
+  if (!account.accountName?.trim()) {
+    return true;
+  }
+
+  const normalizedStructure = account.accountStructure?.trim().toLowerCase();
+  const normalizedPlanType = planType?.trim().toLowerCase();
+  if (!normalizedPlanType) {
+    return false;
+  }
+
+  return ["team", "business", "enterprise"].includes(normalizedPlanType) && normalizedStructure === "personal";
+}
+
 function sanitizeWorkspaceName(name: string | undefined, planType?: string): string | undefined {
   const trimmed = name?.trim();
   if (!trimmed) {
@@ -563,6 +637,26 @@ function sanitizeWorkspaceName(name: string | undefined, planType?: string): str
   }
 
   return trimmed;
+}
+
+function didRemoteAccountMatchClaims(
+  remoteProfile: { accountId?: string } | undefined,
+  claimsAccountId?: string
+): boolean {
+  if (!remoteProfile) {
+    return false;
+  }
+
+  if (!claimsAccountId) {
+    return true;
+  }
+
+  return !remoteProfile.accountId || remoteProfile.accountId === claimsAccountId;
+}
+
+function isCollaborativeWorkspaceStructure(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "team" || normalized === "workspace";
 }
 
 function isGenericPersonalWorkspaceName(value: string): boolean {
@@ -577,14 +671,6 @@ function isPersonalLikePlan(planType?: string): boolean {
   }
 
   return ["free", "plus", "pro", "personal"].includes(normalized);
-}
-
-/**
- * 构建账号存储 ID (使用 MD5 哈希)
- */
-function buildAccountStorageId(email: string, accountId?: string, organizationId?: string): string {
-  const seed = [email.trim(), accountId?.trim(), organizationId?.trim()].filter(Boolean).join("|");
-  return `codex_${crypto.createHash("md5").update(seed).digest("hex")}`;
 }
 
 /**

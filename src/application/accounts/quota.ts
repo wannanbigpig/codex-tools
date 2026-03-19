@@ -17,6 +17,7 @@ const quotaWarningCounts = new Map<string, number>();
 
 export type RefreshView = {
   refresh(): void;
+  markObservedAuthIdentity?: (accountId?: string) => void;
 };
 
 type RefreshSingleQuotaOptions = {
@@ -133,8 +134,11 @@ export async function maybeAutoSwitchForActiveQuota(repo: AccountsRepository, vi
     return false;
   }
 
-  const shouldSwitch =
-    active.quotaSummary.hourlyPercentage <= hourlyThreshold || active.quotaSummary.weeklyPercentage <= weeklyThreshold;
+  const activeHourlyTriggered =
+    hasComparableHourlyWindow(active) && active.quotaSummary.hourlyPercentage <= hourlyThreshold;
+  const activeWeeklyTriggered =
+    hasComparableWeeklyWindow(active) && active.quotaSummary.weeklyPercentage <= weeklyThreshold;
+  const shouldSwitch = activeHourlyTriggered || activeWeeklyTriggered;
   if (!shouldSwitch) {
     return false;
   }
@@ -145,8 +149,10 @@ export async function maybeAutoSwitchForActiveQuota(repo: AccountsRepository, vi
         !account.isActive &&
         !!account.quotaSummary &&
         !account.quotaError &&
-        account.quotaSummary.hourlyPercentage > hourlyThreshold &&
-        account.quotaSummary.weeklyPercentage > weeklyThreshold
+        (!activeHourlyTriggered ||
+          (hasComparableHourlyWindow(account) && account.quotaSummary.hourlyPercentage > hourlyThreshold)) &&
+        (!activeWeeklyTriggered ||
+          (hasComparableWeeklyWindow(account) && account.quotaSummary.weeklyPercentage > weeklyThreshold))
     )
     .sort(compareAutoSwitchCandidate(hourlyThreshold, weeklyThreshold));
 
@@ -156,12 +162,19 @@ export async function maybeAutoSwitchForActiveQuota(repo: AccountsRepository, vi
   }
 
   await repo.switchAccount(next.id);
+  view.markObservedAuthIdentity?.(next.id);
   view.refresh();
 
   const copy = getDashboardCopy(getLanguage());
-  void vscode.window.showInformationMessage(
-    copy.autoSwitchToastSwitched.replace("{account}", formatAccountToastLabel(next))
+  const commandCopy = getCommandCopy();
+  const choice = await vscode.window.showInformationMessage(
+    `${copy.autoSwitchToastSwitched.replace("{account}", formatAccountToastLabel(next))} ${commandCopy.switchedAndAskReload(next.email)}`,
+    commandCopy.reloadNow,
+    commandCopy.later
   );
+  if (choice === commandCopy.reloadNow) {
+    await vscode.commands.executeCommand("workbench.action.reloadWindow");
+  }
   return true;
 }
 
@@ -252,10 +265,45 @@ function getAutoSwitchScore(account: CodexAccountRecord, hourlyThreshold: number
     return Number.NEGATIVE_INFINITY;
   }
 
-  const hourlyMargin = quota.hourlyPercentage - hourlyThreshold;
-  const weeklyMargin = quota.weeklyPercentage - weeklyThreshold;
+  const hourlyMargin = hasComparableHourlyWindow(account) ? quota.hourlyPercentage - hourlyThreshold : -1000;
+  const weeklyMargin = hasComparableWeeklyWindow(account) ? quota.weeklyPercentage - weeklyThreshold : -1000;
   const safetyFloor = Math.min(hourlyMargin, weeklyMargin);
+  const workspacePriority = getAutoSwitchWorkspacePriority(account);
   const freshness = account.lastQuotaAt ?? 0;
 
-  return safetyFloor * 1000 + hourlyMargin + weeklyMargin + freshness / 1_000_000_000_000;
+  return workspacePriority * 1_000_000 + safetyFloor * 1000 + hourlyMargin + weeklyMargin + freshness / 1_000_000_000_000;
+}
+
+function hasComparableHourlyWindow(account: CodexAccountRecord): boolean {
+  const quota = account.quotaSummary;
+  if (!quota?.hourlyWindowPresent) {
+    return false;
+  }
+
+  const windowMinutes = quota.hourlyWindowMinutes;
+  return typeof windowMinutes === "number" && windowMinutes > 0 && windowMinutes <= 360;
+}
+
+function hasComparableWeeklyWindow(account: CodexAccountRecord): boolean {
+  const quota = account.quotaSummary;
+  if (!quota?.weeklyWindowPresent) {
+    return false;
+  }
+
+  const windowMinutes = quota.weeklyWindowMinutes;
+  return typeof windowMinutes === "number" && windowMinutes >= 1440;
+}
+
+function getAutoSwitchWorkspacePriority(account: CodexAccountRecord): number {
+  const normalized = account.accountStructure?.trim().toLowerCase();
+  if (normalized === "organization") {
+    return 3;
+  }
+  if (normalized === "team" || normalized === "workspace") {
+    return 2;
+  }
+  if (normalized === "personal") {
+    return 0;
+  }
+  return 1;
 }

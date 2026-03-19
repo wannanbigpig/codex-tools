@@ -45,6 +45,7 @@ export interface DashboardCopy {
   empty: string;
   noActiveAccountTitle: string;
   noActiveAccountSub: string;
+  primaryAccount: string;
   current: string;
   hourlyLabel: string;
   weeklyLabel: string;
@@ -158,6 +159,7 @@ export interface DashboardAccountViewModel {
   accountId?: string;
   organizationId?: string;
   isActive: boolean;
+  isCurrentWindowAccount: boolean;
   showInStatusBar: boolean;
   canToggleStatusBar: boolean;
   statusToggleTitle: string;

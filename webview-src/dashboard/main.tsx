@@ -665,9 +665,11 @@ function OverviewSection(props: {
         <div class="overview-account">
           <div class="overview-account-top">
             <div class="overview-account-name">{getSensitiveDisplayValue(account.displayName, privacyMode, "name")}</div>
-            <div class="pill active">{copy.current}</div>
-            <div class="pill plan">{account.planTypeLabel}</div>
             {account.hasQuota402 ? <div class="pill error">402</div> : null}
+          </div>
+          <div class="saved-meta">
+            <span class="pill active">{copy.primaryAccount}</span>
+            <span class="pill plan">{account.planTypeLabel}</span>
           </div>
           <div class="overview-account-email">{getSensitiveDisplayValue(account.email, privacyMode, "email")}</div>
           <div class="overview-account-meta">
@@ -806,7 +808,7 @@ function SavedAccountCard(props: {
           <h3>{getSensitiveDisplayValue(account.displayName, privacyMode, "name")}</h3>
           <div class="saved-sub">{getSensitiveDisplayValue(account.email, privacyMode, "email")}</div>
           <div class="saved-sub">
-            {copy.teamName}: {getSensitiveDisplayValue(account.accountName, privacyMode, "name", copy.unknown)}
+            {account.accountStructureLabel}: {getSensitiveDisplayValue(account.accountName, privacyMode, "name", copy.unknown)}
           </div>
           <div class="saved-sub">
             {copy.login}: {account.authProviderLabel}
@@ -815,7 +817,8 @@ function SavedAccountCard(props: {
             {copy.userId}: {userIdDisplay}
           </div>
           <div class="saved-meta">
-            {account.isActive ? <span class="pill active">{copy.current}</span> : null}
+            {account.isActive ? <span class="pill active">{copy.primaryAccount}</span> : null}
+            {account.isCurrentWindowAccount ? <span class="pill active">{copy.current}</span> : null}
             <span class="pill plan">{account.planTypeLabel}</span>
             {account.hasQuota402 ? <span class="pill error">402</span> : null}
             <span class="pill">{account.accountStructureLabel}</span>

@@ -4,6 +4,7 @@ import { ExtensionSettingsStore } from "../../infrastructure/config/extensionSet
 import { formatAccountStructure, formatAuthProvider, formatPlanType, getDashboardCopy } from "./copy";
 import { CodexAccountRecord } from "../../core/types";
 import { resolveCodexAppLaunchPath } from "../../utils/codexApp";
+import { getCurrentWindowRuntimeAccountId } from "../../presentation/workbench/windowRuntimeAccount";
 
 export async function buildDashboardState(
   repo: AccountsRepository,
@@ -17,6 +18,7 @@ export async function buildDashboardState(
     resolvedCodexAppPath: (await resolveCodexAppLaunchPath(baseSettings.codexAppPath)) ?? ""
   };
   const copy = getDashboardCopy(lang);
+  const currentWindowAccountId = getCurrentWindowRuntimeAccountId();
   const sortedAccounts = [...(await repo.listAccounts())].sort(
     (a, b) => Number(b.isActive) - Number(a.isActive) || a.email.localeCompare(b.email)
   );
@@ -29,7 +31,9 @@ export async function buildDashboardState(
     logoUri,
     settings,
     copy,
-    accounts: sortedAccounts.map((account) => mapAccount(account, extraSelectedCount, lang, settings.showCodeReviewQuota, copy))
+    accounts: sortedAccounts.map((account) =>
+      mapAccount(account, extraSelectedCount, lang, settings.showCodeReviewQuota, copy, currentWindowAccountId)
+    )
   };
 }
 
@@ -38,7 +42,8 @@ function mapAccount(
   extraSelectedCount: number,
   lang: DashboardState["lang"],
   showCodeReviewQuota: boolean,
-  copy: DashboardState["copy"]
+  copy: DashboardState["copy"],
+  currentWindowAccountId?: string
 ): DashboardAccountViewModel {
   const canToggleStatusBar = account.isActive ? false : Boolean(account.showInStatusBar) || extraSelectedCount < 2;
 
@@ -54,6 +59,7 @@ function mapAccount(
     accountId: account.accountId,
     organizationId: account.organizationId,
     isActive: account.isActive,
+    isCurrentWindowAccount: account.id === currentWindowAccountId,
     showInStatusBar: Boolean(account.showInStatusBar),
     canToggleStatusBar,
     statusToggleTitle: canToggleStatusBar

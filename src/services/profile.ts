@@ -48,7 +48,7 @@ export async function fetchRemoteAccountProfile(tokens: CodexTokens): Promise<Re
   const primary = await requestAccountProfile(ACCOUNT_CHECK_URL, tokens.accessToken, accountId);
   const shouldRetry =
     accountId &&
-    (!primary.ok ? shouldRetryWithoutWorkspace(primary.status, primary.raw) : !parseAccountProfile(primary.payload, claims.accountId, claims.organizationId));
+    (!primary.ok ? shouldRetryWithoutWorkspace(primary.status, primary.raw) : !parseAccountProfile(primary.payload, accountId, claims.organizationId));
 
   if (shouldRetry) {
     logNetworkEvent("profile.retry-without-workspace", {
@@ -57,7 +57,7 @@ export async function fetchRemoteAccountProfile(tokens: CodexTokens): Promise<Re
     });
     const fallback = await requestAccountProfile(ACCOUNT_CHECK_URL, tokens.accessToken);
     if (fallback.ok) {
-      const fallbackProfile = parseAccountProfile(fallback.payload, claims.accountId, claims.organizationId);
+      const fallbackProfile = parseAccountProfile(fallback.payload, accountId, claims.organizationId);
       if (fallbackProfile) {
         return fallbackProfile;
       }
@@ -71,7 +71,7 @@ export async function fetchRemoteAccountProfile(tokens: CodexTokens): Promise<Re
     });
   }
 
-  return parseAccountProfile(primary.payload, claims.accountId, claims.organizationId);
+  return parseAccountProfile(primary.payload, accountId, claims.organizationId);
 }
 
 async function requestAccountProfile(url: string, accessToken: string, accountId?: string): Promise<{
@@ -151,28 +151,31 @@ function parseAccountProfile(
     return undefined;
   }
 
-  const orderingValue = payload["account_ordering"];
-  const orderedFirstId = Array.isArray(orderingValue)
-    ? orderingValue.find((item): item is string => typeof item === "string" && item.trim().length > 0)
-    : undefined;
-
-  // 按优先级查找：期望的账号 ID > 排序后的第一个 ID > 期望的组织 ID > 第一条记录
   let selected: Record<string, unknown> | undefined;
 
   if (expectedAccountId) {
     selected = findById(records, expectedAccountId);
-  }
+    // 当请求已明确指定账号时，只接受精确匹配，避免把其他 workspace 错绑到当前令牌上。
+    if (!selected) {
+      return undefined;
+    }
+  } else {
+    const orderingValue = payload["account_ordering"];
+    const orderedFirstId = Array.isArray(orderingValue)
+      ? orderingValue.find((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : undefined;
 
-  if (!selected && orderedFirstId) {
-    selected = findById(records, orderedFirstId);
-  }
+    if (orderedFirstId) {
+      selected = findById(records, orderedFirstId);
+    }
 
-  if (!selected && expectedOrgId) {
-    selected = findByOrg(records, expectedOrgId);
-  }
+    if (!selected && expectedOrgId) {
+      selected = findByOrg(records, expectedOrgId);
+    }
 
-  if (!selected) {
-    selected = records[0];
+    if (!selected) {
+      selected = records[0];
+    }
   }
 
   return {
