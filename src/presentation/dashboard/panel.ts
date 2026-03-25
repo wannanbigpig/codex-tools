@@ -46,9 +46,10 @@ class DashboardPanelController {
   open(): void {
     const panelTitle = getDashboardCopy(this.settingsStore.resolveLanguage()).panelTitle;
     const iconUri = vscode.Uri.joinPath(this.context.extensionUri, "media", "CT_logo_transparent_square_hd.png");
+    const targetColumn = this.getTargetViewColumn();
 
     if (!this.panel) {
-      this.panel = vscode.window.createWebviewPanel(DASHBOARD_VIEW_TYPE, panelTitle, vscode.ViewColumn.Beside, {
+      this.panel = vscode.window.createWebviewPanel(DASHBOARD_VIEW_TYPE, panelTitle, targetColumn, {
         enableScripts: true,
         retainContextWhenHidden: true,
         localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "media")]
@@ -84,12 +85,21 @@ class DashboardPanelController {
     } else {
       this.panel.title = panelTitle;
       this.panel.iconPath = iconUri;
-      this.panel.reveal(vscode.ViewColumn.Beside, false);
+      this.panel.reveal(targetColumn, false);
     }
 
     if (this.webviewReady) {
       this.schedulePublishState();
     }
+  }
+
+  private getTargetViewColumn(): vscode.ViewColumn {
+    const activeEditorColumn = vscode.window.activeTextEditor?.viewColumn;
+    if (activeEditorColumn !== undefined) {
+      return activeEditorColumn;
+    }
+
+    return vscode.ViewColumn.Active;
   }
 
   async refresh(): Promise<void> {
