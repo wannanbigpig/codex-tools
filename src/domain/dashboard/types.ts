@@ -51,6 +51,8 @@ export interface DashboardCopy {
   panelTitle: string;
   brandSub: string;
   refreshPage: string;
+  githubProject: string;
+  githubProjectTip: string;
   addAccount: string;
   importCurrent: string;
   refreshAll: string;

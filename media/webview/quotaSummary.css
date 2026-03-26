@@ -266,6 +266,21 @@ body {
   border-color: rgba(255, 255, 255, 0.22);
   transform: translateY(-1px);
 }
+.github-project-btn {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+    linear-gradient(135deg, rgba(96, 165, 250, 0.16), rgba(139, 92, 246, 0.08));
+}
+.github-project-btn .button-face,
+.github-project-btn .button-icon,
+.github-project-btn .button-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.github-project-btn:hover,
+.github-project-btn:focus-visible {
+  border-color: rgba(96, 165, 250, 0.4);
+}
 .button-icon {
   width: 16px;
   height: 16px;
@@ -1286,6 +1301,8 @@ body {
 }
 .action-btn.icon-only:hover .button-tip,
 .action-btn.icon-only:focus-visible .button-tip,
+.github-project-btn:hover .button-tip,
+.github-project-btn:focus-visible .button-tip,
 .action-btn:hover .button-tip-inline,
 .action-btn:focus-visible .button-tip-inline {
   opacity: 1;

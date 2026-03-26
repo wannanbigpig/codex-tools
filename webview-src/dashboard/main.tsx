@@ -30,6 +30,7 @@ const AUTO_SWITCH_VALUES = Array.from({ length: 20 }, (_, index) => index + 1);
 const AUTO_SWITCH_LOCK_VALUES = [0, 5, 10, 15, 30, 60, 120];
 const WARNING_VALUES = Array.from({ length: 18 }, (_, index) => 5 + index * 5);
 const WARNING_SCALE_VALUES = [5, 20, 35, 50, 65, 80, 90];
+const GITHUB_PROJECT_URL = "https://github.com/wannanbigpig/codex-accounts-manager";
 type PendingActionRequest = {
   requestId: string;
   action: DashboardActionName;
@@ -607,6 +608,23 @@ function App() {
               </div>
             </div>
             <div class="hero-settings">
+              <button
+                id="githubProjectButton"
+                class="settings-btn action-btn github-project-btn"
+                type="button"
+                title={snapshot.copy.githubProject}
+                aria-label={snapshot.copy.githubProject}
+                onClick={() => sendAction("openExternalUrl", undefined, { url: GITHUB_PROJECT_URL })}
+              >
+                <span class="button-face">
+                  <span class="button-icon">
+                    <GitHubIcon />
+                  </span>
+                </span>
+                <span class="button-tip" aria-hidden="true">
+                  {snapshot.copy.githubProjectTip}
+                </span>
+              </button>
               <button
                 id="privacyToggleButton"
                 class={`settings-btn ${state.privacyMode ? "is-active" : ""}`}
@@ -2726,6 +2744,17 @@ function EyeOffIcon() {
         stroke-width="1.8"
         stroke-linecap="round"
         stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
+function GitHubIcon() {
+  return (
+    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 2.2a9.8 9.8 0 0 0-3.1 19.1c.5.1.7-.2.7-.5v-1.9c-2.8.6-3.4-1.2-3.4-1.2-.5-1.1-1.1-1.4-1.1-1.4-.9-.6.1-.6.1-.6 1 .1 1.6 1 1.6 1 .9 1.6 2.3 1.1 2.9.8.1-.6.3-1.1.6-1.3-2.2-.2-4.6-1.1-4.6-5a3.9 3.9 0 0 1 1-2.7c-.1-.3-.5-1.3.1-2.6 0 0 .8-.3 2.7 1a9.1 9.1 0 0 1 4.9 0c1.9-1.3 2.7-1 2.7-1 .6 1.3.2 2.3.1 2.6a3.9 3.9 0 0 1 1 2.7c0 3.9-2.4 4.8-4.7 5 .4.3.7 1 .7 2.1v3.1c0 .3.2.6.7.5A9.8 9.8 0 0 0 12 2.2Z"
+        fill="currentColor"
       />
     </svg>
   );
