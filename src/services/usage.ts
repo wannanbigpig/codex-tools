@@ -1,10 +1,9 @@
 import { CodexDailyUsageBreakdown, CodexDailyUsagePoint, CodexTokens } from "../core/types";
 import { APIError } from "../core/errors";
+import { DAILY_USAGE_BREAKDOWN_URL } from "../infrastructure/config/apiEndpoints";
 import { extractClaims } from "../utils/jwt";
 import { logNetworkEvent } from "../utils/debug";
 import { fetchWithTimeout } from "../utils/network";
-
-const DAILY_USAGE_BREAKDOWN_URL = "https://chatgpt.com/backend-api/wham/usage/daily-token-usage-breakdown";
 
 type UnknownRecord = Record<string, unknown>;
 

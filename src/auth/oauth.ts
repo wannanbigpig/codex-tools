@@ -6,13 +6,20 @@ import { isTokenExpired } from "../utils/jwt";
 import { fetchWithTimeout } from "../utils/network";
 import { logNetworkEvent } from "../utils/debug";
 import { AuthError, ErrorCode, APIError } from "../core/errors";
+import {
+  AUTH_ENDPOINT,
+  TOKEN_ENDPOINT,
+  OAUTH_CLIENT_ID,
+  OAUTH_SCOPES,
+  OAUTH_ORIGINATOR,
+  OAUTH_CALLBACK_PORT
+} from "../infrastructure/config/apiEndpoints";
 
-const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
-const AUTH_ENDPOINT = "https://auth.openai.com/oauth/authorize";
-const TOKEN_ENDPOINT = "https://auth.openai.com/oauth/token";
-const SCOPES = "openid profile email offline_access";
-const ORIGINATOR = "codex_vscode";
-const CALLBACK_PORT = 1455;
+// 使用别名保持向后兼容
+const CLIENT_ID = OAUTH_CLIENT_ID;
+const SCOPES = OAUTH_SCOPES;
+const ORIGINATOR = OAUTH_ORIGINATOR;
+const CALLBACK_PORT = OAUTH_CALLBACK_PORT;
 
 interface OAuthSession {
   state: string;

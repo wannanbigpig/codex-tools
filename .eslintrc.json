@@ -84,7 +84,8 @@
   "ignorePatterns": [
     "out/",
     "node_modules/",
-    "*.js"
+    "*.js",
+    "test/"
   ],
   "env": {
     "node": true

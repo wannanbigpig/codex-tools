@@ -72,6 +72,7 @@ import {
   SharedCodexAccountJson
 } from "../core/types";
 import { fetchRemoteAccountProfile } from "../services/profile";
+import { clearQuotaCacheForAccount } from "../services/quota";
 import { buildAccountStorageId } from "../utils/accountIdentity";
 import { extractClaims } from "../utils/jwt";
 import { AccountError, StorageError, createError, ErrorCode } from "../core/errors";
@@ -627,6 +628,7 @@ export class AccountsRepository {
     }
 
     await this.secretStore.deleteTokens(accountId);
+    clearQuotaCacheForAccount(accountId);
     this.writeIndex(index);
   }
 

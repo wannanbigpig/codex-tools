@@ -15,6 +15,7 @@ import { shouldRetryWithoutWorkspace } from "./workspaceRetry";
 import { fetchWithTimeout, isRetriableHttpStatus, isRetriableNetworkError, retryWithBackoff } from "../utils/network";
 import { APIError } from "../core/errors";
 import { logNetworkEvent } from "../utils/debug";
+import { ACCOUNT_CHECK_URL } from "../infrastructure/config/apiEndpoints";
 
 const PROFILE_CACHE_TTL_MS = 60_000;
 
@@ -51,8 +52,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @returns 账号档案信息，获取失败时返回 undefined
  */
 export async function fetchRemoteAccountProfile(tokens: CodexTokens): Promise<RemoteAccountProfile | undefined> {
-  const ACCOUNT_CHECK_URL = "https://chatgpt.com/backend-api/wham/accounts/check";
-
   const claims = extractClaims(tokens.idToken, tokens.accessToken);
   const accountId = tokens.accountId ?? claims.accountId;
   pruneProfileCache();

@@ -11,14 +11,13 @@
 import { CodexAccountRecord, CodexQuotaErrorInfo, CodexQuotaSummary, CodexTokens, CodexUsageResponse } from "../core/types";
 import { needsRefresh, refreshTokens } from "../auth/oauth";
 import { shouldRetryWithoutWorkspace } from "./workspaceRetry";
+import { QUOTA_USAGE_URL } from "../infrastructure/config/apiEndpoints";
 import { extractClaims } from "../utils/jwt";
 import { logNetworkEvent } from "../utils/debug";
 import { fetchWithTimeout, isRetriableHttpStatus, isRetriableNetworkError, retryWithBackoff } from "../utils/network";
 
 /** 配额缓存失效时间 (毫秒) - 避免短时间内重复刷新 */
 const QUOTA_CACHE_TTL_MS = 30000; // 30 秒
-
-const QUOTA_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 
 /** 配额缓存接口 */
 interface QuotaCacheEntry {
@@ -33,6 +32,9 @@ const quotaCache = new Map<string, QuotaCacheEntry>();
 
 /** 同账号并发刷新复用 */
 const inflightQuotaRefreshes = new Map<string, Promise<QuotaRefreshResult>>();
+
+/** 账号缓存失效代次 */
+const quotaCacheGenerations = new Map<string, number>();
 
 export interface QuotaRefreshResult {
   quota?: CodexQuotaSummary;
@@ -55,6 +57,7 @@ export async function refreshQuota(
   forceRefresh = false
 ): Promise<QuotaRefreshResult> {
   pruneQuotaCache();
+  const generation = getQuotaCacheGeneration(account.id);
   if (!forceRefresh) {
     const cached = quotaCache.get(account.id);
     if (cached) {
@@ -101,10 +104,12 @@ export async function refreshQuota(
     const usage = usageResult.payload;
     const quotaSummary = parseUsage(usage);
 
-    quotaCache.set(account.id, {
-      summary: quotaSummary,
-      timestamp: Date.now()
-    });
+    if (generation === getQuotaCacheGeneration(account.id)) {
+      quotaCache.set(account.id, {
+        summary: quotaSummary,
+        timestamp: Date.now()
+      });
+    }
 
     return {
       quota: quotaSummary,
@@ -315,4 +320,19 @@ function pruneQuotaCache(): void {
       quotaCache.delete(key);
     }
   }
+}
+
+/**
+ * 清理指定账号的配额缓存
+ *
+ * @param accountId - 账号 ID
+ */
+export function clearQuotaCacheForAccount(accountId: string): void {
+  quotaCacheGenerations.set(accountId, getQuotaCacheGeneration(accountId) + 1);
+  quotaCache.delete(accountId);
+  inflightQuotaRefreshes.delete(accountId);
+}
+
+function getQuotaCacheGeneration(accountId: string): number {
+  return quotaCacheGenerations.get(accountId) ?? 0;
 }
