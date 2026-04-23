@@ -89,6 +89,10 @@ export function needsRefresh(accessToken: string, skewSeconds = 60): boolean {
   return isTokenExpired(accessToken, skewSeconds);
 }
 
+export function needsTokenRefresh(tokens: Pick<CodexTokens, "idToken" | "accessToken">, skewSeconds = 60): boolean {
+  return isTokenExpired(tokens.accessToken, skewSeconds) || isTokenExpired(tokens.idToken, skewSeconds);
+}
+
 export function prepareOAuthLoginSession(port = CALLBACK_PORT): PreparedOAuthLoginSession {
   const verifier = randomBase64Url();
   const challenge = sha256Base64Url(verifier);

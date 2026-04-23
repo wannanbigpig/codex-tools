@@ -29,11 +29,26 @@ export async function buildDashboardState(
   const accounts = await repo.listAccounts();
   const tokenEntries = await Promise.all(accounts.map(async (account) => [account.id, await repo.getTokens(account.id)] as const));
   const tokensByAccountId = new Map(tokenEntries);
+  const accountViewStateById = new Map(
+    accounts.map((account) => {
+      const tokens = tokensByAccountId.get(account.id);
+      const health = resolveAccountHealth(account, tokens, tokenAutomation);
+      return [
+        account.id,
+        {
+          tokens,
+          health,
+          dismissedHealth: isHealthDismissed(account, health),
+          automationState: getAccountAutomationState(tokenAutomation, account.id),
+          healthPriority: getHealthPriority(health)
+        }
+      ] as const;
+    })
+  );
   const sortedAccounts = [...accounts].sort(
     (a, b) =>
       Number(b.isActive) - Number(a.isActive) ||
-      getHealthPriority(resolveAccountHealth(b, tokensByAccountId.get(b.id), tokenAutomation)) -
-        getHealthPriority(resolveAccountHealth(a, tokensByAccountId.get(a.id), tokenAutomation)) ||
+      (accountViewStateById.get(b.id)?.healthPriority ?? 0) - (accountViewStateById.get(a.id)?.healthPriority ?? 0) ||
       b.createdAt - a.createdAt ||
       a.email.localeCompare(b.email)
   );
@@ -57,8 +72,7 @@ export async function buildDashboardState(
     accounts: sortedAccounts.map((account) =>
       mapAccount(
         account,
-        tokensByAccountId.get(account.id),
-        tokenAutomation,
+        accountViewStateById.get(account.id),
         extraSelectedCount,
         lang,
         settings.showCodeReviewQuota,
@@ -72,8 +86,14 @@ export async function buildDashboardState(
 
 function mapAccount(
   account: CodexAccountRecord,
-  tokens: Awaited<ReturnType<AccountsRepository["getTokens"]>>,
-  tokenAutomation: ReturnType<typeof getTokenAutomationSnapshot>,
+  viewState:
+    | {
+        tokens: Awaited<ReturnType<AccountsRepository["getTokens"]>>;
+        health: ReturnType<typeof resolveAccountHealth>;
+        dismissedHealth: boolean;
+        automationState: ReturnType<typeof getAccountAutomationState>;
+      }
+    | undefined,
   extraSelectedCount: number,
   lang: DashboardState["lang"],
   showCodeReviewQuota: boolean,
@@ -82,9 +102,9 @@ function mapAccount(
   autoSwitchRuntime?: ReturnType<typeof getAutoSwitchRuntimeSnapshot>
 ): DashboardAccountViewModel {
   const canToggleStatusBar = account.isActive ? false : Boolean(account.showInStatusBar) || extraSelectedCount < 2;
-  const health = resolveAccountHealth(account, tokens, tokenAutomation);
-  const dismissedHealth = isHealthDismissed(account, health);
-  const automationState = getAccountAutomationState(tokenAutomation, account.id);
+  const health = viewState?.health ?? resolveAccountHealth(account, viewState?.tokens, getTokenAutomationSnapshot());
+  const dismissedHealth = viewState?.dismissedHealth ?? isHealthDismissed(account, health);
+  const automationState = viewState?.automationState;
 
   return {
     quotaIssueKind: getQuotaIssueKind(account.quotaError),

@@ -1,9 +1,11 @@
 import type { CodexAccountRecord, CodexIndexHealthSummary } from "../../core/types";
+import type { TokenAutomationSnapshot } from "./tokenAutomationState";
 
 export function buildWorkbenchRefreshSignature(params: {
   observedAuthIdentity?: string;
   indexHealth: CodexIndexHealthSummary;
   accounts: CodexAccountRecord[];
+  tokenAutomation?: TokenAutomationSnapshot;
 }): string {
   const accountSignature = params.accounts
     .map((account) =>
@@ -38,6 +40,26 @@ export function buildWorkbenchRefreshSignature(params: {
       ].join(":")
     )
     .join("|");
+  const tokenAutomationSignature = params.tokenAutomation
+    ? [
+        params.tokenAutomation.enabled ? "1" : "0",
+        params.tokenAutomation.intervalMs,
+        params.tokenAutomation.skewSeconds,
+        params.tokenAutomation.lastSweepAt ?? "",
+        params.tokenAutomation.nextSweepAt ?? "",
+        params.tokenAutomation.lastSuccessAt ?? "",
+        params.tokenAutomation.lastFailureMessage ?? "",
+        Object.entries(params.tokenAutomation.accounts)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(
+            ([accountId, state]) =>
+              `${accountId}:${state.lastCheckAt ?? ""}:${state.lastRefreshAt ?? ""}:${state.lastError ?? ""}:${
+                state.lastErrorAt ?? ""
+              }`
+          )
+          .join("|")
+      ].join(":")
+    : "";
 
   return [
     params.observedAuthIdentity ?? "",
@@ -46,6 +68,7 @@ export function buildWorkbenchRefreshSignature(params: {
     params.indexHealth.availableBackups,
     params.indexHealth.lastErrorMessage ?? "",
     params.indexHealth.lastRecoveredAt ?? "",
+    tokenAutomationSignature,
     accountSignature
   ].join("||");
 }

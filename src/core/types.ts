@@ -191,6 +191,16 @@ export interface DecodedAuthClaims {
 export interface UsageWindowInfo {
   /** 已使用百分比 */
   used_percent?: number;
+  /** 剩余百分比 */
+  remaining_percent?: number;
+  /** 剩余请求数 */
+  remaining?: number;
+  /** 窗口总请求数 */
+  limit?: number;
+  /** 剩余请求数（兼容字段） */
+  requests_left?: number;
+  /** 窗口总请求数（兼容字段） */
+  requests_limit?: number;
   /** 窗口长度 (秒) */
   limit_window_seconds?: number;
   /** 距离重置的秒数 */
@@ -211,6 +221,24 @@ export interface CodexUsageResponse {
     primary_window?: UsageWindowInfo;
     /** 次窗口 */
     secondary_window?: UsageWindowInfo;
+    /** 代码审查速率限制（兼容嵌套字段） */
+    code_review_rate_limit?: {
+      primary_window?: UsageWindowInfo;
+      secondary_window?: UsageWindowInfo;
+      windows?: UsageWindowInfo[];
+    };
+    /** 代码审查速率限制（驼峰兼容） */
+    codeReviewRateLimit?: {
+      primary_window?: UsageWindowInfo;
+      secondary_window?: UsageWindowInfo;
+      windows?: UsageWindowInfo[];
+    };
+    /** 代码审查速率限制（历史兼容） */
+    code_review?: {
+      primary_window?: UsageWindowInfo;
+      secondary_window?: UsageWindowInfo;
+      windows?: UsageWindowInfo[];
+    };
   };
   /** 代码审查速率限制 */
   code_review_rate_limit?: {
@@ -218,6 +246,20 @@ export interface CodexUsageResponse {
     primary_window?: UsageWindowInfo;
     /** 次窗口 */
     secondary_window?: UsageWindowInfo;
+    /** 窗口集合（兼容字段） */
+    windows?: UsageWindowInfo[];
+  };
+  /** 代码审查速率限制（驼峰兼容） */
+  codeReviewRateLimit?: {
+    primary_window?: UsageWindowInfo;
+    secondary_window?: UsageWindowInfo;
+    windows?: UsageWindowInfo[];
+  };
+  /** 代码审查速率限制（历史兼容） */
+  code_review?: {
+    primary_window?: UsageWindowInfo;
+    secondary_window?: UsageWindowInfo;
+    windows?: UsageWindowInfo[];
   };
 }
 

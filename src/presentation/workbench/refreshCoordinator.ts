@@ -10,6 +10,7 @@ import { refreshQuotaSummaryPanel } from "../dashboard";
 import { AccountsStatusBarProvider, refreshDetailsPanel } from "../../ui";
 import { needsWindowReloadForAccount, setCurrentWindowRuntimeAccountId } from "./windowRuntimeAccount";
 import { buildWorkbenchRefreshSignature } from "./refreshSignature";
+import { getTokenAutomationSnapshot } from "./tokenAutomationState";
 
 type RefreshView = {
   refresh: () => void;
@@ -62,7 +63,8 @@ export class WorkbenchRefreshCoordinator {
     const signature = buildWorkbenchRefreshSignature({
       observedAuthIdentity: this.lastObservedAuthIdentity,
       indexHealth,
-      accounts
+      accounts,
+      tokenAutomation: getTokenAutomationSnapshot()
     });
     if (signature === this.lastRefreshSignature) {
       return;

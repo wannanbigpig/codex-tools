@@ -99,9 +99,13 @@ export function registerTokenRefreshScheduler(params: {
         try {
           const tokens = await params.repo.getTokens(account.id);
           markTokenAutomationCheck(account.id);
-          if (!tokens?.accessToken || !tokens.refreshToken || !needsRefresh(tokens.accessToken, params.skewSeconds)) {
+          if (!tokens?.accessToken || !needsRefresh(tokens.accessToken, params.skewSeconds)) {
             clearTokenAutomationError(account.id);
             continue;
+          }
+
+          if (!tokens.refreshToken) {
+            throw new Error("Token expired and no refresh token is available");
           }
 
           const refreshed = await refreshTokens(tokens.refreshToken);

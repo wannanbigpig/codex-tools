@@ -229,4 +229,48 @@ describe("workbench refresh signature helpers", () => {
 
     expect(dashboardBase).not.toBe(dashboardNext);
   });
+
+  it("changes workbench signatures when token automation state changes", () => {
+    const base = buildWorkbenchRefreshSignature({
+      observedAuthIdentity: "acct-1",
+      indexHealth: {
+        status: "healthy",
+        availableBackups: 1
+      },
+      accounts: [{ id: "a", email: "a@example.com", isActive: true, createdAt: 1, updatedAt: 2 }],
+      tokenAutomation: {
+        enabled: true,
+        intervalMs: 300_000,
+        skewSeconds: 600,
+        lastSweepAt: 100,
+        accounts: {
+          a: {
+            lastCheckAt: 100
+          }
+        }
+      }
+    });
+    const next = buildWorkbenchRefreshSignature({
+      observedAuthIdentity: "acct-1",
+      indexHealth: {
+        status: "healthy",
+        availableBackups: 1
+      },
+      accounts: [{ id: "a", email: "a@example.com", isActive: true, createdAt: 1, updatedAt: 2 }],
+      tokenAutomation: {
+        enabled: true,
+        intervalMs: 300_000,
+        skewSeconds: 600,
+        lastSweepAt: 200,
+        accounts: {
+          a: {
+            lastCheckAt: 200,
+            lastRefreshAt: 200
+          }
+        }
+      }
+    });
+
+    expect(base).not.toBe(next);
+  });
 });

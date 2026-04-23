@@ -7,6 +7,7 @@ const { fetchWithTimeoutMock } = vi.hoisted(() => ({
 
 vi.mock("../src/auth/oauth", () => ({
   needsRefresh: vi.fn(() => false),
+  needsTokenRefresh: vi.fn(() => false),
   refreshTokens: vi.fn()
 }));
 
@@ -91,5 +92,173 @@ describe("quota cache invalidation", () => {
 
     expect(fetchWithTimeoutMock).toHaveBeenCalledTimes(2);
     expect(secondResult.quota?.hourlyPercentage).toBe(80);
+  });
+
+  it("interprets fractional used_percent values as ratios", async () => {
+    fetchWithTimeoutMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          rate_limit: {
+            primary_window: {
+              used_percent: 0.25,
+              reset_after_seconds: 300,
+              limit_window_seconds: 18_000
+            },
+            secondary_window: {
+              used_percent: 0.5,
+              reset_after_seconds: 600,
+              limit_window_seconds: 604_800
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      )
+    );
+
+    const result = await refreshQuota(account, tokens, true);
+
+    expect(result.quota?.hourlyPercentage).toBe(75);
+    expect(result.quota?.weeklyPercentage).toBe(50);
+  });
+
+  it("does not mark a quota window present when used_percent is missing", async () => {
+    fetchWithTimeoutMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          rate_limit: {
+            primary_window: {
+              reset_after_seconds: 300,
+              limit_window_seconds: 18_000
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      )
+    );
+
+    const result = await refreshQuota(account, tokens, true);
+
+    expect(result.quota?.hourlyWindowPresent).toBe(false);
+    expect(result.quota?.hourlyPercentage).toBe(0);
+  });
+
+  it("falls back to code review secondary window when primary has no used_percent", async () => {
+    fetchWithTimeoutMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          rate_limit: {
+            primary_window: {
+              used_percent: 10,
+              reset_after_seconds: 300,
+              limit_window_seconds: 18_000
+            }
+          },
+          code_review_rate_limit: {
+            primary_window: {
+              reset_after_seconds: 300,
+              limit_window_seconds: 86_400
+            },
+            secondary_window: {
+              used_percent: 30,
+              reset_after_seconds: 900,
+              limit_window_seconds: 86_400
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      )
+    );
+
+    const result = await refreshQuota(account, tokens, true);
+
+    expect(result.quota?.codeReviewWindowPresent).toBe(true);
+    expect(result.quota?.codeReviewPercentage).toBe(70);
+  });
+
+  it("reads code review quota from nested rate_limit aliases", async () => {
+    fetchWithTimeoutMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          rate_limit: {
+            primary_window: {
+              used_percent: 10,
+              reset_after_seconds: 300,
+              limit_window_seconds: 18_000
+            },
+            secondary_window: {
+              used_percent: 20,
+              reset_after_seconds: 900,
+              limit_window_seconds: 604_800
+            },
+            code_review_rate_limit: {
+              secondary_window: {
+                remaining_percent: 35,
+                reset_after_seconds: 1200,
+                limit_window_seconds: 86_400
+              }
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      )
+    );
+
+    const result = await refreshQuota(account, tokens, true);
+
+    expect(result.quota?.codeReviewWindowPresent).toBe(true);
+    expect(result.quota?.codeReviewPercentage).toBe(35);
+  });
+
+  it("falls back review quota to weekly when no dedicated review window is returned", async () => {
+    fetchWithTimeoutMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          rate_limit: {
+            primary_window: {
+              used_percent: 10,
+              reset_after_seconds: 300,
+              limit_window_seconds: 18_000
+            },
+            secondary_window: {
+              used_percent: 40,
+              reset_after_seconds: 900,
+              limit_window_seconds: 604_800
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      )
+    );
+
+    const result = await refreshQuota(account, tokens, true);
+
+    expect(result.quota?.weeklyPercentage).toBe(60);
+    expect(result.quota?.codeReviewWindowPresent).toBe(true);
+    expect(result.quota?.codeReviewPercentage).toBe(60);
   });
 });

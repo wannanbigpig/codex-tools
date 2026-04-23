@@ -136,13 +136,13 @@ function padLabel(label: string, width: number): string {
   return label.length >= width ? label : `${label}${" ".repeat(width - label.length)}`;
 }
 
-function buildThinBar(percent?: number, width = 10): string {
+export function buildThinBar(percent?: number, width = 10): string {
   if (typeof percent !== "number") {
     return "╌".repeat(width);
   }
 
   const clamped = Math.max(0, Math.min(100, percent));
-  const filled = Math.max(1, Math.round((clamped / 100) * width));
+  const filled = Math.round((clamped / 100) * width);
   return `${"▰".repeat(filled)}${"▱".repeat(Math.max(0, width - filled))}`;
 }
 

@@ -75,6 +75,7 @@ import { fetchRemoteAccountProfile } from "../services/profile";
 import { clearQuotaCacheForAccount } from "../services/quota";
 import { buildAccountStorageId } from "../utils/accountIdentity";
 import { extractClaims } from "../utils/jwt";
+import { getQuotaIssueKind } from "../utils/quotaIssue";
 import { AccountError, StorageError, createError, ErrorCode } from "../core/errors";
 
 /** 缓存失效时间 (毫秒) */
@@ -256,7 +257,20 @@ export class AccountsRepository {
    */
   async getTokens(accountId: string): Promise<CodexTokens | undefined> {
     try {
-      return await this.secretStore.getTokens(accountId);
+      const storedTokens = await this.secretStore.getTokens(accountId);
+      const aideckTokens = await readAideckCodexTokens(accountId);
+      const mergedTokens = mergeExternalTokens(storedTokens, aideckTokens);
+
+      if (!mergedTokens) {
+        return storedTokens;
+      }
+
+      if (!storedTokens || shouldSyncTokensFromAuthFile(storedTokens, mergedTokens)) {
+        await this.secretStore.setTokens(accountId, mergedTokens);
+        clearQuotaCacheForAccount(accountId);
+      }
+
+      return mergedTokens;
     } catch (cause) {
       throw new StorageError(`Failed to get tokens for ${accountId}`, {
         code: ErrorCode.STORAGE_SECRET_ACCESS_FAILED,
@@ -280,10 +294,18 @@ export class AccountsRepository {
 
     await this.secretStore.setTokens(accountId, effectiveTokens);
 
+    let shouldWriteIndex = false;
     if (effectiveTokens.accountId && effectiveTokens.accountId !== account.accountId) {
       account.accountId = effectiveTokens.accountId;
       account.updatedAt = Date.now();
-      this.writeIndex(index);
+      shouldWriteIndex = true;
+    }
+
+    if (getQuotaIssueKind(account.quotaError) === "auth") {
+      account.quotaError = undefined;
+      account.dismissedHealthIssueKey = undefined;
+      account.updatedAt = Date.now();
+      shouldWriteIndex = true;
     }
 
     if (account.isActive) {
@@ -291,6 +313,10 @@ export class AccountsRepository {
         ...effectiveTokens,
         accountId: account.accountId ?? effectiveTokens.accountId
       });
+    }
+
+    if (shouldWriteIndex) {
+      this.writeIndex(index);
     }
 
     return account;
@@ -701,10 +727,14 @@ export class AccountsRepository {
 
     const nextStoredTokens = updatedTokens ?? (account.accountId !== previousStoredAccountId ? storedTokens : undefined);
     if (storedTokens && nextStoredTokens) {
-      await this.secretStore.setTokens(accountId, {
+      const effectiveNextTokens = {
         ...nextStoredTokens,
         accountId: account.accountId ?? storedTokens.accountId
-      });
+      };
+      await this.secretStore.setTokens(accountId, effectiveNextTokens);
+      if (account.isActive) {
+        await writeAuthFile(effectiveNextTokens);
+      }
     }
 
     this.writeIndex(index);
@@ -722,8 +752,39 @@ export class AccountsRepository {
     const derivedId = claims?.email
       ? buildAccountStorageId(claims.email, claims.accountId, claims.organizationId)
       : undefined;
+    let changed = syncActiveAccountState(index, derivedId);
 
-    if (syncActiveAccountState(index, derivedId)) {
+    if (auth?.tokens?.id_token && auth.tokens.access_token && derivedId) {
+      const account = index.accounts.find((item) => item.id === derivedId);
+      if (account) {
+        const nextTokens: CodexTokens = {
+          idToken: auth.tokens.id_token,
+          accessToken: auth.tokens.access_token,
+          refreshToken: auth.tokens.refresh_token,
+          accountId: auth.tokens.account_id ?? claims?.accountId ?? account.accountId
+        };
+        const storedTokens = await this.secretStore.getTokens(derivedId);
+
+        if (shouldSyncTokensFromAuthFile(storedTokens, nextTokens)) {
+          await this.secretStore.setTokens(derivedId, nextTokens);
+          clearQuotaCacheForAccount(derivedId);
+
+          if (nextTokens.accountId && nextTokens.accountId !== account.accountId) {
+            account.accountId = nextTokens.accountId;
+          }
+
+          if (getQuotaIssueKind(account.quotaError) === "auth") {
+            account.quotaError = undefined;
+            account.dismissedHealthIssueKey = undefined;
+          }
+
+          account.updatedAt = Date.now();
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
       this.writeIndex(index);
     }
   }
@@ -854,6 +915,104 @@ export class AccountsRepository {
       originalError
     });
   }
+}
+
+function shouldSyncTokensFromAuthFile(
+  current: CodexTokens | undefined,
+  next: CodexTokens
+): boolean {
+  return toComparableTokenSnapshot(current) !== toComparableTokenSnapshot(next);
+}
+
+function toComparableTokenSnapshot(tokens: CodexTokens | undefined): string {
+  if (!tokens) {
+    return "";
+  }
+
+  return JSON.stringify({
+    idToken: tokens.idToken ?? "",
+    accessToken: tokens.accessToken ?? "",
+    refreshToken: tokens.refreshToken ?? "",
+    accountId: tokens.accountId ?? ""
+  });
+}
+
+function mergeExternalTokens(
+  current: CodexTokens | undefined,
+  external: Partial<CodexTokens> | undefined
+): CodexTokens | undefined {
+  if (!external) {
+    return current;
+  }
+
+  const merged: CodexTokens = {
+    idToken: external.idToken ?? current?.idToken ?? "",
+    accessToken: external.accessToken ?? current?.accessToken ?? "",
+    refreshToken: external.refreshToken ?? current?.refreshToken,
+    accountId: external.accountId ?? current?.accountId
+  };
+
+  if (!merged.idToken || !merged.accessToken) {
+    return current;
+  }
+
+  return merged;
+}
+
+async function readAideckCodexTokens(accountId: string): Promise<Partial<CodexTokens> | undefined> {
+  const filePath = getAideckCodexAccountFilePath(accountId);
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const tokenSource = getRecord(parsed["tokens"]);
+    const idToken = readString(tokenSource?.["id_token"]) ?? readString(parsed["id_token"]);
+    const accessToken =
+      readString(tokenSource?.["access_token"]) ??
+      readString(parsed["access_token"]) ??
+      readString(parsed["token"]);
+    const refreshToken =
+      readString(tokenSource?.["refresh_token"]) ??
+      readString(parsed["refresh_token"]) ??
+      undefined;
+    const externalAccountId =
+      readString(tokenSource?.["account_id"]) ??
+      readString(parsed["account_id"]) ??
+      undefined;
+
+    if (!idToken && !accessToken && !refreshToken && !externalAccountId) {
+      return undefined;
+    }
+
+    return {
+      idToken,
+      accessToken,
+      refreshToken,
+      accountId: externalAccountId
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function getAideckCodexAccountFilePath(accountId: string): string {
+  const envDataRoot = process.env["AIDECK_DATA_DIR"]?.trim();
+  const dataRoot = envDataRoot ? envDataRoot.replace(/^['"]|['"]$/g, "") : path.join(os.homedir(), ".ai_deck");
+  return path.join(dataRoot, "accounts", "codex", "accounts", `${accountId}.json`);
+}
+
+function getRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function readString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 /**

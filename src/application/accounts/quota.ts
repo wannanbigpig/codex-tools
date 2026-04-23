@@ -14,6 +14,7 @@ import {
   isAutoSwitchLocked,
   recordAutoSwitchReason
 } from "../../presentation/workbench/autoSwitchState";
+import { clearTokenAutomationError } from "../../presentation/workbench/tokenAutomationState";
 import { getCommandCopy, getLanguage, getQuotaWarningCopy } from "../../utils";
 import { getDashboardCopy } from "../dashboard/copy";
 
@@ -62,6 +63,9 @@ export async function refreshSingleQuota(
 
   const result = await refreshQuota(account, tokens, forceRefresh);
   await repo.updateQuota(accountId, result.quota, result.error, result.updatedTokens, result.updatedPlanType);
+  if (!result.error) {
+    clearTokenAutomationError(accountId);
+  }
   if (shouldRefreshView) {
     view.refresh();
   }
@@ -100,6 +104,9 @@ export async function refreshImportedAccountQuota(
 
   const result = await refreshQuota(account, tokens, true);
   await repo.updateQuota(accountId, result.quota, result.error, result.updatedTokens, result.updatedPlanType);
+  if (!result.error) {
+    clearTokenAutomationError(accountId);
+  }
   await maybeWarnForAccount(repo, accountId);
   return result;
 }

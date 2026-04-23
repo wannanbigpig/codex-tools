@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { needsRefresh, refreshTokens } from "../auth/oauth";
 import { CodexAccountRecord, CodexAutoSwitchReason, CodexDailyUsageBreakdown, CodexDailyUsagePoint } from "../core/types";
 import { resolveAccountHealth, isHealthDismissed } from "../application/accounts/health";
 import { formatAccountStructure } from "../application/dashboard/copy";
@@ -134,7 +135,7 @@ export function openDetailsPanel(
 
 async function hydrateUsage(repo: AccountsRepository, accountId: string, requestId: number): Promise<void> {
   try {
-    const tokens = await repo.getTokens(accountId);
+    const tokens = await getFreshUsageTokens(repo, accountId);
     if (!tokens || !detailsPanel || requestId !== detailsPanelRequestId || detailsPanelState.accountId !== accountId) {
       return;
     }
@@ -156,6 +157,32 @@ async function hydrateUsage(repo: AccountsRepository, accountId: string, request
     detailsPanelState.usage = undefined;
     await refreshDetailsPanel();
   }
+}
+
+async function getFreshUsageTokens(
+  repo: AccountsRepository,
+  accountId: string
+): Promise<Awaited<ReturnType<AccountsRepository["getTokens"]>>> {
+  const tokens = await repo.getTokens(accountId);
+  if (!tokens?.accessToken || !needsRefresh(tokens.accessToken)) {
+    return tokens;
+  }
+
+  if (!tokens.refreshToken) {
+    return tokens;
+  }
+
+  const refreshed = await refreshTokens(tokens.refreshToken);
+  await repo.updateTokens(accountId, {
+    ...refreshed,
+    accountId: refreshed.accountId ?? tokens.accountId
+  });
+
+  return {
+    ...tokens,
+    ...refreshed,
+    accountId: refreshed.accountId ?? tokens.accountId
+  };
 }
 
 export async function refreshDetailsPanel(): Promise<void> {

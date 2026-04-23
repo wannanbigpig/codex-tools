@@ -8,7 +8,14 @@
  * - 添加配额刷新缓存，避免短时间内重复 API 调用
  */
 
-import { CodexAccountRecord, CodexQuotaErrorInfo, CodexQuotaSummary, CodexTokens, CodexUsageResponse } from "../core/types";
+import {
+  CodexAccountRecord,
+  CodexQuotaErrorInfo,
+  CodexQuotaSummary,
+  CodexTokens,
+  CodexUsageResponse,
+  UsageWindowInfo
+} from "../core/types";
 import { needsRefresh, refreshTokens } from "../auth/oauth";
 import { shouldRetryWithoutWorkspace } from "./workspaceRetry";
 import { QUOTA_USAGE_URL } from "../infrastructure/config/apiEndpoints";
@@ -191,24 +198,77 @@ function parseUsagePayload(raw: string): CodexUsageResponse {
 function parseUsage(usage: CodexUsageResponse): CodexQuotaSummary {
   const primary = usage.rate_limit?.primary_window;
   const secondary = usage.rate_limit?.secondary_window;
-  const codeReviewPrimary = usage.code_review_rate_limit?.primary_window;
+  const codeReviewRateLimit = resolveCodeReviewRateLimit(usage);
+  const codeReviewWindow = resolveCodeReviewWindow(codeReviewRateLimit);
+  const percentScale = detectUsagePercentScale(primary, secondary, codeReviewWindow);
   const { hourlyWindow, weeklyWindow } = resolveRateLimitWindows(primary, secondary);
+  const hourlyPercentage = resolveRemainingPercentage(hourlyWindow, percentScale);
+  const weeklyPercentage = resolveRemainingPercentage(weeklyWindow, percentScale);
+  const codeReviewPercentage = resolveRemainingPercentage(codeReviewWindow, percentScale);
+  const resolvedCodeReviewPercentage = codeReviewPercentage ?? weeklyPercentage;
 
   return {
-    hourlyPercentage: normalizeRemaining(hourlyWindow?.used_percent),
+    hourlyPercentage: hourlyPercentage ?? 0,
     hourlyResetTime: normalizeReset(hourlyWindow?.reset_at, hourlyWindow?.reset_after_seconds),
     hourlyWindowMinutes: normalizeWindow(hourlyWindow?.limit_window_seconds),
-    hourlyWindowPresent: Boolean(hourlyWindow),
-    weeklyPercentage: normalizeRemaining(weeklyWindow?.used_percent),
+    hourlyWindowPresent: hourlyPercentage !== undefined,
+    weeklyPercentage: weeklyPercentage ?? 0,
     weeklyResetTime: normalizeReset(weeklyWindow?.reset_at, weeklyWindow?.reset_after_seconds),
     weeklyWindowMinutes: normalizeWindow(weeklyWindow?.limit_window_seconds),
-    weeklyWindowPresent: Boolean(weeklyWindow),
-    codeReviewPercentage: normalizeRemaining(codeReviewPrimary?.used_percent),
-    codeReviewResetTime: normalizeReset(codeReviewPrimary?.reset_at, codeReviewPrimary?.reset_after_seconds),
-    codeReviewWindowMinutes: normalizeWindow(codeReviewPrimary?.limit_window_seconds),
-    codeReviewWindowPresent: Boolean(codeReviewPrimary),
+    weeklyWindowPresent: weeklyPercentage !== undefined,
+    codeReviewPercentage: resolvedCodeReviewPercentage ?? 0,
+    codeReviewResetTime:
+      normalizeReset(codeReviewWindow?.reset_at, codeReviewWindow?.reset_after_seconds) ??
+      normalizeReset(weeklyWindow?.reset_at, weeklyWindow?.reset_after_seconds),
+    codeReviewWindowMinutes:
+      normalizeWindow(codeReviewWindow?.limit_window_seconds) ??
+      normalizeWindow(weeklyWindow?.limit_window_seconds),
+    codeReviewWindowPresent: resolvedCodeReviewPercentage !== undefined,
     rawData: usage
   };
+}
+
+function resolveCodeReviewRateLimit(
+  usage: CodexUsageResponse
+): NonNullable<CodexUsageResponse["code_review_rate_limit"]> | undefined {
+  return (
+    usage.code_review_rate_limit ??
+    usage.codeReviewRateLimit ??
+    usage.code_review ??
+    usage.rate_limit?.code_review_rate_limit ??
+    usage.rate_limit?.codeReviewRateLimit ??
+    usage.rate_limit?.code_review
+  );
+}
+
+function resolveCodeReviewWindow(
+  rateLimit?: NonNullable<CodexUsageResponse["code_review_rate_limit"]>
+): UsageWindowInfo | undefined {
+  if (!rateLimit) {
+    return undefined;
+  }
+
+  const windows = [
+    rateLimit.primary_window,
+    rateLimit.secondary_window,
+    ...(Array.isArray(rateLimit.windows) ? rateLimit.windows : [])
+  ].filter((window): window is UsageWindowInfo => Boolean(window));
+
+  if (windows.length === 0) {
+    return undefined;
+  }
+
+  const withQuotaData = windows.find((window) => hasQuotaData(window));
+  if (withQuotaData) {
+    return withQuotaData;
+  }
+
+  if (windows.length === 1) {
+    return windows[0];
+  }
+
+  const sorted = [...windows].sort((left, right) => getWindowSeconds(left) - getWindowSeconds(right));
+  return sorted[0];
 }
 
 function resolveRateLimitWindows(
@@ -248,7 +308,7 @@ function isWeeklyQuotaWindow(window: NonNullable<CodexUsageResponse["rate_limit"
   return typeof minutes === "number" && minutes >= 1440;
 }
 
-function getWindowSeconds(window?: NonNullable<CodexUsageResponse["rate_limit"]>["primary_window"]): number {
+function getWindowSeconds(window?: UsageWindowInfo): number {
   const seconds = window?.limit_window_seconds;
   return typeof seconds === "number" && seconds > 0 ? seconds : Number.MAX_SAFE_INTEGER;
 }
@@ -256,9 +316,72 @@ function getWindowSeconds(window?: NonNullable<CodexUsageResponse["rate_limit"]>
 /**
  * 规范化剩余百分比 (转换为 0-100 的范围)
  */
-function normalizeRemaining(usedPercent?: number): number {
-  const used = Math.max(0, Math.min(100, usedPercent ?? 0));
-  return 100 - used;
+function resolveRemainingPercentage(window: UsageWindowInfo | undefined, scale: "percent" | "ratio"): number | undefined {
+  if (!window) {
+    return undefined;
+  }
+
+  const usedPercent = normalizePercentValue(window.used_percent, scale);
+  if (usedPercent !== undefined) {
+    return 100 - usedPercent;
+  }
+
+  const remainingPercent = normalizePercentValue(window.remaining_percent, scale);
+  if (remainingPercent !== undefined) {
+    return remainingPercent;
+  }
+
+  const remaining = pickNumber(window.remaining, window.requests_left);
+  const limit = pickNumber(window.limit, window.requests_limit);
+  if (remaining !== undefined && limit !== undefined && limit > 0) {
+    return clampPercent((remaining / limit) * 100);
+  }
+
+  return undefined;
+}
+
+function hasQuotaData(window: UsageWindowInfo): boolean {
+  return (
+    pickNumber(window.used_percent) !== undefined ||
+    pickNumber(window.remaining_percent) !== undefined ||
+    (pickNumber(window.remaining, window.requests_left) !== undefined &&
+      pickNumber(window.limit, window.requests_limit) !== undefined)
+  );
+}
+
+function normalizePercentValue(value: number | undefined, scale: "percent" | "ratio"): number | undefined {
+  const raw = pickNumber(value);
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  const normalized = scale === "ratio" || (raw >= 0 && raw <= 1) ? raw * 100 : raw;
+  return clampPercent(normalized);
+}
+
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+function pickNumber(...values: Array<number | undefined>): number | undefined {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function detectUsagePercentScale(...windows: Array<UsageWindowInfo | undefined>): "percent" | "ratio" {
+  const values = windows
+    .map((window) => window?.used_percent)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+
+  if (!values.length) {
+    return "percent";
+  }
+
+  return values.every((value) => value >= 0 && value <= 1) ? "ratio" : "percent";
 }
 
 /**
