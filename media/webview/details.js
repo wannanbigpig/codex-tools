@@ -24,42 +24,60 @@
 
   function formatRelativeTime(epochSeconds) {
     if (!epochSeconds) {
-      return lang === "zh" ? "重置时间未知" : "reset unknown";
+      return isChinese() ? "重置时间未知" : "reset unknown";
     }
 
-    const deltaMs = epochSeconds * 1000 - Date.now();
-    const abs = Math.abs(deltaMs);
-    const minutes = Math.round(abs / 60000);
-    const future = deltaMs >= 0;
-
-    if (minutes < 60) {
-      return lang === "zh"
-        ? future ? "剩余" + minutes + "分钟" : minutes + "分钟前"
-        : future ? minutes + "m left" : minutes + "m ago";
+    const diffSeconds = epochSeconds - Math.floor(Date.now() / 1000);
+    if (diffSeconds <= 0) {
+      return isChinese() ? "已重置" : "reset";
     }
 
-    const hours = Math.round(minutes / 60);
-    if (hours < 48) {
-      return lang === "zh"
-        ? future ? "剩余" + hours + "小时" : hours + "小时前"
-        : future ? hours + "h left" : hours + "h ago";
+    const totalMinutes = Math.floor(diffSeconds / 60);
+    if (totalMinutes <= 0) {
+      return isChinese() ? "不到1分钟" : "<1m left";
     }
 
-    const days = Math.round(hours / 24);
-    return lang === "zh"
-      ? future ? "剩余" + days + "天" : days + "天前"
-      : future ? days + "d left" : days + "d ago";
+    const days = Math.floor(totalMinutes / (60 * 24));
+    const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+    const minutes = totalMinutes % 60;
+    const parts = [];
+
+    if (days > 0) {
+      parts.push(formatDurationPart(days, "d"));
+    }
+    if (hours > 0) {
+      parts.push(formatDurationPart(hours, "h"));
+    }
+    if (minutes > 0) {
+      parts.push(formatDurationPart(minutes, "m"));
+    }
+
+    return isChinese() ? parts.join(" ") : parts.join(" ") + " left";
+  }
+
+  function formatDurationPart(value, unit) {
+    if (lang === "zh-hant") {
+      return value + ({ d: "天", h: "小時", m: "分鐘" }[unit] || "");
+    }
+    if (lang === "zh") {
+      return value + ({ d: "天", h: "小时", m: "分钟" }[unit] || "");
+    }
+    return value + unit;
+  }
+
+  function isChinese() {
+    return lang === "zh" || lang === "zh-hant";
   }
 
   function updateLiveTimes() {
     document.querySelectorAll(".live-reset").forEach((node) => {
       const value = Number(node.dataset.resetAt);
-      const fallback = node.dataset.resetUnknown || (lang === "zh" ? "重置时间未知" : "reset unknown");
+      const fallback = node.dataset.resetUnknown || (isChinese() ? "重置时间未知" : "reset unknown");
       node.textContent = value ? formatRelativeTime(value) : fallback;
     });
     document.querySelectorAll(".live-timestamp").forEach((node) => {
       const value = Number(node.dataset.epochMs);
-      const fallback = node.dataset.never || (lang === "zh" ? "从未" : "never");
+      const fallback = node.dataset.never || (isChinese() ? "从未" : "never");
       node.textContent = value ? new Date(value).toLocaleString() : fallback;
     });
   }

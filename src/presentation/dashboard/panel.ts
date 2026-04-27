@@ -9,6 +9,7 @@ import type {
 } from "../../domain/dashboard/types";
 import { ExtensionSettingsStore } from "../../infrastructure/config/extensionSettings";
 import { AccountsRepository } from "../../storage";
+import { AnnouncementService, type AnnouncementOptions } from "../../services/announcements";
 import { renderDashboardShell } from "./shell";
 import { buildDashboardStateSignature } from "./signature";
 import { executeDashboardActionMessage } from "./actionHandlers";
@@ -22,6 +23,7 @@ let dashboardPanelController: DashboardPanelController | undefined;
 
 class DashboardPanelController {
   private readonly settingsStore = new ExtensionSettingsStore();
+  private readonly announcements: AnnouncementService;
   private readonly oauth: DashboardOAuthCoordinator;
   private panel: vscode.WebviewPanel | undefined;
   private configWatcher: vscode.Disposable | undefined;
@@ -33,6 +35,7 @@ class DashboardPanelController {
     private readonly context: vscode.ExtensionContext,
     private readonly repo: AccountsRepository
   ) {
+    this.announcements = new AnnouncementService(context.globalStorageUri.fsPath, context.extensionUri.fsPath);
     this.oauth = new DashboardOAuthCoordinator(repo, () => {
       this.schedulePublishState();
     });
@@ -154,7 +157,12 @@ class DashboardPanelController {
     const logoUri = this.panel.webview
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "CT_logo_transparent_square_hd.png"))
       .toString();
-    const state = await buildDashboardState(this.repo, this.settingsStore, logoUri);
+    const state = await buildDashboardState(
+      this.repo,
+      this.settingsStore,
+      logoUri,
+      await this.announcements.getState(this.getAnnouncementOptions())
+    );
     this.panel.title = state.panelTitle;
     const signature = buildDashboardStateSignature(state);
     if (signature === this.lastPublishedStateSignature) {
@@ -178,7 +186,9 @@ class DashboardPanelController {
         resolveLanguage: () => this.settingsStore.resolveLanguage(),
         schedulePublishState: () => this.schedulePublishState(),
         reloadShell: () => this.reloadShell(),
-        oauth: this.oauth
+        oauth: this.oauth,
+        announcements: this.announcements,
+        getAnnouncementOptions: () => this.getAnnouncementOptions()
       },
       message
     );
@@ -225,6 +235,14 @@ class DashboardPanelController {
 
   private async pickCodexAppPath(): Promise<void> {
     await pickDashboardCodexAppPath(this.settingsStore);
+  }
+
+  private getAnnouncementOptions(): AnnouncementOptions {
+    const packageJson = this.context.extension.packageJSON as { version?: string };
+    return {
+      version: packageJson.version ?? "0.0.0",
+      locale: this.settingsStore.resolveLanguage()
+    };
   }
 }
 

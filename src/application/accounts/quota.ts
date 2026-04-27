@@ -25,7 +25,6 @@ const AUTO_SWITCH_PREFER_SAME_EMAIL = "autoSwitchPreferSameEmail";
 const AUTO_SWITCH_PREFER_SAME_TAG = "autoSwitchPreferSameTag";
 const QUOTA_WARNING_ENABLED = "quotaWarningEnabled";
 const QUOTA_WARNING_THRESHOLD = "quotaWarningThreshold";
-const SHOW_CODE_REVIEW_QUOTA = "showCodeReviewQuota";
 const MAX_WARNINGS_PER_CYCLE = 3;
 const quotaWarningCounts = new Map<string, number>();
 
@@ -62,7 +61,14 @@ export async function refreshSingleQuota(
   }
 
   const result = await refreshQuota(account, tokens, forceRefresh);
-  await repo.updateQuota(accountId, result.quota, result.error, result.updatedTokens, result.updatedPlanType);
+  await repo.updateQuota(
+    accountId,
+    result.quota,
+    result.error,
+    result.updatedTokens,
+    result.updatedPlanType,
+    result.updatedSubscriptionActiveUntil
+  );
   if (!result.error) {
     clearTokenAutomationError(accountId);
   }
@@ -103,7 +109,14 @@ export async function refreshImportedAccountQuota(
   }
 
   const result = await refreshQuota(account, tokens, true);
-  await repo.updateQuota(accountId, result.quota, result.error, result.updatedTokens, result.updatedPlanType);
+  await repo.updateQuota(
+    accountId,
+    result.quota,
+    result.error,
+    result.updatedTokens,
+    result.updatedPlanType,
+    result.updatedSubscriptionActiveUntil
+  );
   if (!result.error) {
     clearTokenAutomationError(accountId);
   }
@@ -231,7 +244,6 @@ export async function maybeWarnForAccount(repo: AccountsRepository, accountId: s
   }
 
   const threshold = normalizeQuotaWarningThreshold(config.get<number>(QUOTA_WARNING_THRESHOLD, 20));
-  const showCodeReview = config.get<boolean>(SHOW_CODE_REVIEW_QUOTA, true);
   const account = await repo.getAccount(accountId);
   if (!account?.isActive || !account.quotaSummary) {
     return;
@@ -240,8 +252,7 @@ export async function maybeWarnForAccount(repo: AccountsRepository, accountId: s
   const copy = getQuotaWarningCopy();
   const checks = [
     { label: copy.hourlyLabel, value: account.quotaSummary.hourlyPercentage },
-    { label: copy.weeklyLabel, value: account.quotaSummary.weeklyPercentage },
-    ...(showCodeReview ? [{ label: copy.reviewLabel, value: account.quotaSummary.codeReviewPercentage }] : [])
+    { label: copy.weeklyLabel, value: account.quotaSummary.weeklyPercentage }
   ];
 
   for (const check of checks) {

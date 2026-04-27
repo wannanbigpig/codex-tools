@@ -23,7 +23,6 @@ export class AccountsStatusBarProvider {
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (
           event.affectsConfiguration("codexAccounts.displayLanguage") ||
-          event.affectsConfiguration("codexAccounts.showCodeReviewQuota") ||
           event.affectsConfiguration("codexAccounts.quotaGreenThreshold") ||
           event.affectsConfiguration("codexAccounts.quotaYellowThreshold")
         ) {
@@ -39,7 +38,6 @@ export class AccountsStatusBarProvider {
     const currentWindowAccountId = getCurrentWindowRuntimeAccountId();
     const primary = accounts.find((item) => item.id === currentWindowAccountId) ?? active ?? accounts[0];
     const _t = t();
-    const showCodeReview = vscode.workspace.getConfiguration("codexAccounts").get<boolean>("showCodeReviewQuota", true);
 
     if (!primary) {
       this.item.text = `${STATUS_BAR_ICON} Codex Accounts Manager`;
@@ -53,7 +51,7 @@ export class AccountsStatusBarProvider {
     }
 
     this.item.text = buildStatusText(primary);
-    this.item.tooltip = buildTooltip(primary, active, accounts, showCodeReview);
+    this.item.tooltip = buildTooltip(primary, active, accounts);
     this.item.show();
   }
 }
@@ -70,8 +68,7 @@ function buildStatusText(account: CodexAccountRecord): string {
 function buildTooltip(
   primary: CodexAccountRecord,
   active: CodexAccountRecord | undefined,
-  accounts: CodexAccountRecord[],
-  showCodeReview: boolean
+  accounts: CodexAccountRecord[]
 ): vscode.MarkdownString {
   const _t = t();
   const md = new vscode.MarkdownString(undefined, true);
@@ -83,10 +80,10 @@ function buildTooltip(
     .slice(0, 2);
 
   md.appendMarkdown(`**${_t("panel.dashboard.title")}**\n\n`);
-  md.appendMarkdown(renderAccountPanel(primary, true, primary.id === active?.id, showCodeReview));
+  md.appendMarkdown(renderAccountPanel(primary, true, primary.id === active?.id));
   for (const account of [...fallbackActive, ...selectedExtras]) {
     md.appendMarkdown(`\n---\n\n`);
-    md.appendMarkdown(renderAccountPanel(account, false, account.id === active?.id, showCodeReview));
+    md.appendMarkdown(renderAccountPanel(account, false, account.id === active?.id));
   }
 
   md.appendMarkdown(`\n\n---\n${_t("status.tooltip")}`);
@@ -96,8 +93,7 @@ function buildTooltip(
 function renderAccountPanel(
   account: CodexAccountRecord,
   current: boolean,
-  primary: boolean,
-  showCodeReview: boolean
+  primary: boolean
 ): string {
   const _t = t();
   const title = `${account.accountName ?? account.email} · ${account.email}`;
@@ -119,8 +115,13 @@ function renderAccountPanel(
       : [])
   ];
 
-  if (showCodeReview && account.quotaSummary?.codeReviewWindowPresent) {
-    lines.push(renderMetricRow(_t("quota.review"), account.quotaSummary?.codeReviewPercentage, account.quotaSummary?.codeReviewResetTime));
+  for (const limit of account.quotaSummary?.additionalRateLimits ?? []) {
+    if (limit.hourlyWindowPresent) {
+      lines.push(renderMetricRow(`${limit.limitName} ${_t("quota.hourly")}`, limit.hourlyPercentage, limit.hourlyResetTime));
+    }
+    if (limit.weeklyWindowPresent) {
+      lines.push(renderMetricRow(`${limit.limitName} ${_t("quota.weekly")}`, limit.weeklyPercentage, limit.weeklyResetTime));
+    }
   }
 
   return `${lines.join("  \n")}\n`;

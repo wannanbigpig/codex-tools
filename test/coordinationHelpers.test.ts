@@ -116,6 +116,7 @@ describe("workbench refresh signature helpers", () => {
       brandSub: "brand",
       logoUri: "logo",
       settings: {
+        dashboardTheme: "auto",
         codexAppRestartEnabled: false,
         codexAppRestartMode: "manual",
         backgroundTokenRefreshEnabled: true,
@@ -128,7 +129,6 @@ describe("workbench refresh signature helpers", () => {
         autoSwitchLockMinutes: 0,
         codexAppPath: "",
         resolvedCodexAppPath: "",
-        showCodeReviewQuota: true,
         quotaWarningEnabled: false,
         quotaWarningThreshold: 20,
         quotaGreenThreshold: 60,
@@ -142,6 +142,11 @@ describe("workbench refresh signature helpers", () => {
       } as never,
       tokenAutomation: {
         enabled: false
+      },
+      announcements: {
+        announcements: [],
+        unreadIds: [],
+        popupAnnouncement: null
       },
       indexHealth: {
         status: "healthy",
@@ -174,6 +179,7 @@ describe("workbench refresh signature helpers", () => {
       brandSub: "brand",
       logoUri: "logo",
       settings: {
+        dashboardTheme: "auto",
         codexAppRestartEnabled: false,
         codexAppRestartMode: "manual",
         backgroundTokenRefreshEnabled: true,
@@ -186,7 +192,6 @@ describe("workbench refresh signature helpers", () => {
         autoSwitchLockMinutes: 0,
         codexAppPath: "",
         resolvedCodexAppPath: "",
-        showCodeReviewQuota: true,
         quotaWarningEnabled: false,
         quotaWarningThreshold: 20,
         quotaGreenThreshold: 60,
@@ -200,6 +205,11 @@ describe("workbench refresh signature helpers", () => {
       } as never,
       tokenAutomation: {
         enabled: false
+      },
+      announcements: {
+        announcements: [],
+        unreadIds: [],
+        popupAnnouncement: null
       },
       indexHealth: {
         status: "healthy",

@@ -1,12 +1,14 @@
 import type { DashboardLanguage, DashboardLanguageOption } from "../../localization/languages";
 import type {
   CodexAutoSwitchReason,
+  CodexAnnouncementState,
   CodexImportPreviewSummary,
   CodexImportResultSummary,
   CodexIndexHealthSummary
 } from "../../core/types";
 
 export type DashboardSettingKey =
+  | "dashboardTheme"
   | "codexAppRestartEnabled"
   | "codexAppRestartMode"
   | "backgroundTokenRefreshEnabled"
@@ -17,7 +19,6 @@ export type DashboardSettingKey =
   | "autoSwitchPreferSameEmail"
   | "autoSwitchPreferSameTag"
   | "autoSwitchLockMinutes"
-  | "showCodeReviewQuota"
   | "quotaWarningEnabled"
   | "quotaWarningThreshold"
   | "quotaGreenThreshold"
@@ -26,6 +27,7 @@ export type DashboardSettingKey =
   | "displayLanguage";
 
 export interface DashboardSettings {
+  dashboardTheme: DashboardThemeOption;
   codexAppRestartEnabled: boolean;
   codexAppRestartMode: "auto" | "manual";
   backgroundTokenRefreshEnabled: boolean;
@@ -38,7 +40,6 @@ export interface DashboardSettings {
   autoSwitchLockMinutes: number;
   codexAppPath: string;
   resolvedCodexAppPath: string;
-  showCodeReviewQuota: boolean;
   quotaWarningEnabled: boolean;
   quotaWarningThreshold: number;
   quotaGreenThreshold: number;
@@ -47,12 +48,30 @@ export interface DashboardSettings {
   displayLanguage: DashboardLanguageOption;
 }
 
+export type DashboardThemeOption = "auto" | "dark" | "light";
+
 export interface DashboardCopy {
   panelTitle: string;
   brandSub: string;
   refreshPage: string;
   githubProject: string;
   githubProjectTip: string;
+  announcementsTitle: string;
+  announcementsTooltip: string;
+  announcementsEmpty: string;
+  announcementsRefresh: string;
+  announcementsRefreshing: string;
+  announcementsMarkAllRead: string;
+  announcementsGotIt: string;
+  announcementsPinned: string;
+  announcementsTypeInfo: string;
+  announcementsTypeFeature: string;
+  announcementsTypeWarning: string;
+  announcementsTypeUrgent: string;
+  announcementsJustNow: string;
+  announcementsMinutesAgo: string;
+  announcementsHoursAgo: string;
+  announcementsDaysAgo: string;
   addAccount: string;
   importCurrent: string;
   refreshAll: string;
@@ -271,13 +290,15 @@ export interface DashboardCopy {
   resetUnknown: string;
 }
 
-type DashboardMetricKey = "hourly" | "weekly" | "review";
+type DashboardMetricKey = string;
 
 export interface DashboardMetricViewModel {
   key: DashboardMetricKey;
   label: string;
   percentage?: number;
   resetAt?: number;
+  requestsLeft?: number;
+  requestsLimit?: number;
   visible: boolean;
 }
 
@@ -289,7 +310,16 @@ export interface DashboardAccountViewModel {
   tags: string[];
   authProviderLabel: string;
   accountStructureLabel: string;
+  workspaceLabel: string;
+  isTeamWorkspace: boolean;
+  subscriptionText: string;
+  subscriptionTitle: string;
+  subscriptionColor?: string;
+  addMethodLabel: string;
+  addedAtLabel: string;
+  statusColor?: string;
   planTypeLabel: string;
+  creditsText?: string;
   userId?: string;
   accountId?: string;
   organizationId?: string;
@@ -352,6 +382,7 @@ export interface DashboardState {
   settings: DashboardSettings;
   copy: DashboardCopy;
   tokenAutomation: DashboardTokenAutomationViewModel;
+  announcements: CodexAnnouncementState;
   indexHealth: CodexIndexHealthSummary;
   accounts: DashboardAccountViewModel[];
 }
@@ -360,6 +391,9 @@ export type DashboardActionName =
   | "addAccount"
   | "importCurrent"
   | "refreshAll"
+  | "refreshAnnouncements"
+  | "markAnnouncementRead"
+  | "markAllAnnouncementsRead"
   | "shareTokens"
   | "restoreFromBackup"
   | "restoreFromAuthJson"
@@ -407,6 +441,7 @@ export interface DashboardActionPayload {
   tags?: string[];
   mode?: "set" | "add" | "remove";
   lockMinutes?: number;
+  announcementId?: string;
 }
 
 export interface DashboardActionResultPayload {

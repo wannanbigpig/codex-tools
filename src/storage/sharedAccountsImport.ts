@@ -65,13 +65,15 @@ export function createSharedImportIssue(
 export function applySharedAccountEntry(account: CodexAccountRecord, entry: SharedCodexAccountJson): void {
   account.userId = sanitizeOptionalValue(entry.user_id) ?? account.userId;
   account.planType = sanitizeOptionalValue(entry.plan_type) ?? account.planType;
+  account.subscriptionActiveUntil = sanitizeOptionalValue(entry.subscription_active_until) ?? account.subscriptionActiveUntil;
   account.accountId = sanitizeOptionalValue(entry.account_id) ?? account.accountId;
   account.organizationId = sanitizeOptionalValue(entry.organization_id) ?? account.organizationId;
   account.accountName = sanitizeOptionalValue(entry.account_name) ?? account.accountName;
   account.tags = normalizeAccountTags(entry.tags, account.tags);
+  account.addedVia = sanitizeOptionalValue(entry.added_via) ?? account.addedVia ?? "json";
   account.accountStructure = sanitizeOptionalValue(entry.account_structure) ?? account.accountStructure;
   account.createdAt = normalizeEpochMs(entry.created_at) ?? account.createdAt;
-  account.updatedAt = normalizeEpochMs(entry.last_used) ?? Date.now();
+  account.updatedAt = normalizeEpochMs(entry.last_used) ?? normalizeEpochMs(entry.added_at ?? undefined) ?? Date.now();
 
   if (entry.quota !== undefined) {
     account.quotaSummary = entry.quota ? normalizeQuotaSummary(fromSharedQuota(entry.quota)) : undefined;

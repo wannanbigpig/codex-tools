@@ -68,6 +68,17 @@ function readString(record: Record<string, unknown>, key: string): string | unde
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function readOptionalScalar(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  if (typeof value === "string") {
+    return value.trim() || undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return undefined;
+}
+
 /**
  * 从 JWT 令牌中提取认证声明
  *
@@ -117,7 +128,10 @@ export function extractClaims(idToken: string, accessToken?: string): DecodedAut
       (accessAuth ? readString(accessAuth, "chatgpt_organization_id") : undefined) ??
       (accessAuth ? readString(accessAuth, "org_id") : undefined),
     organizations,
-    loginAt: readLoginEpochMs(idPayload, accessPayload)
+    loginAt: readLoginEpochMs(idPayload, accessPayload),
+    subscriptionActiveUntil:
+      readOptionalScalar(idAuth, "chatgpt_subscription_active_until") ??
+      readOptionalScalar(accessAuth, "chatgpt_subscription_active_until")
   };
 
   const expiryCandidates = [readExpiryEpochMs(idPayload), readExpiryEpochMs(accessPayload)].filter(

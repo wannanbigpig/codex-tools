@@ -5,6 +5,7 @@ import {
   SettingsPathBlock,
   SettingsPreferenceRow,
   SettingsSegmentBlock,
+  SettingsThemeBlock,
   SettingsThresholdBlock,
   SettingsToggleBlock
 } from "./components";
@@ -19,6 +20,7 @@ const WARNING_SCALE_VALUES = [5, 20, 35, 50, 65, 80, 90];
 export function SettingsOverlay(props: {
   open: boolean;
   copy: DashboardCopy;
+  lang: DashboardState["lang"];
   settings: DashboardSettings;
   tokenAutomation: DashboardState["tokenAutomation"];
   onClose: () => void;
@@ -46,6 +48,14 @@ export function SettingsOverlay(props: {
           </button>
         </div>
         <div class="settings-modal-body">
+          <SettingsThemeBlock
+            lang={props.lang}
+            settings={props.settings}
+            onChange={(value) => {
+              props.onPatchSettings({ dashboardTheme: value });
+              props.onSendSetting("dashboardTheme", value);
+            }}
+          />
           <SettingsLanguageBlock
             copy={props.copy}
             settings={props.settings}
@@ -206,26 +216,6 @@ export function SettingsOverlay(props: {
             settings={props.settings}
             onPreview={props.onThresholdPreview}
             onCommit={props.onThresholdCommit}
-          />
-          <SettingsSegmentBlock
-            title={props.copy.dashboardSettingsTitle}
-            sub={props.copy.dashboardSettingsSub}
-            options={[
-              {
-                key: "show-review",
-                title: props.copy.showReviewOn,
-                description: props.copy.showReviewOnDesc,
-                active: props.settings.showCodeReviewQuota,
-                onClick: () => patchAndSend("showCodeReviewQuota", true)
-              },
-              {
-                key: "hide-review",
-                title: props.copy.showReviewOff,
-                description: props.copy.showReviewOffDesc,
-                active: !props.settings.showCodeReviewQuota,
-                onClick: () => patchAndSend("showCodeReviewQuota", false)
-              }
-            ]}
           />
           <SettingsToggleBlock
             title={props.copy.tokenAutomationTitle}

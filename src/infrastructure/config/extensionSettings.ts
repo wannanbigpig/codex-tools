@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { DashboardSettings } from "../../domain/dashboard/types";
+import type { DashboardSettings, DashboardThemeOption } from "../../domain/dashboard/types";
 import { DashboardLanguage, DashboardLanguageOption, resolveDashboardLanguage } from "../../localization/languages";
 import { normalizeQuotaColorThresholds } from "../../utils";
 
@@ -14,6 +14,7 @@ export class ExtensionSettingsStore {
     );
 
     return {
+      dashboardTheme: normalizeDashboardTheme(config.get<string>("dashboardTheme", "auto")),
       codexAppRestartEnabled: config.get<boolean>("codexAppRestartEnabled", false),
       codexAppRestartMode: config.get<"auto" | "manual">("codexAppRestartMode") ?? "manual",
       backgroundTokenRefreshEnabled: config.get<boolean>("backgroundTokenRefreshEnabled", true),
@@ -26,7 +27,6 @@ export class ExtensionSettingsStore {
       autoSwitchLockMinutes: normalizeAutoSwitchLockMinutes(config.get<number>("autoSwitchLockMinutes", 0)),
       codexAppPath: config.get<string>("codexAppPath", ""),
       resolvedCodexAppPath: "",
-      showCodeReviewQuota: config.get<boolean>("showCodeReviewQuota", true),
       quotaWarningEnabled: config.get<boolean>("quotaWarningEnabled", false),
       quotaWarningThreshold: normalizeQuotaWarningThreshold(config.get<number>("quotaWarningThreshold", 20)),
       quotaGreenThreshold: thresholds.green,
@@ -48,6 +48,10 @@ export class ExtensionSettingsStore {
       }
     });
   }
+}
+
+export function normalizeDashboardTheme(value: string | undefined): DashboardThemeOption {
+  return value === "dark" || value === "light" || value === "auto" ? value : "auto";
 }
 
 export function getCodexAccountsConfiguration(): vscode.WorkspaceConfiguration {

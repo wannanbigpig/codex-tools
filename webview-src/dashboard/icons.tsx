@@ -173,6 +173,28 @@ export function GitHubIcon() {
   );
 }
 
+export function BellIcon() {
+  return (
+    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M15.8 17.5H8.2a3 3 0 0 1-2.6-4.5l.4-.7c.4-.7.6-1.5.6-2.3V8.5a5.4 5.4 0 0 1 10.8 0V10c0 .8.2 1.6.6 2.3l.4.7a3 3 0 0 1-2.6 4.5Z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M9.6 18.2a2.5 2.5 0 0 0 4.8 0"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      />
+    </svg>
+  );
+}
+
 export function GlobeIcon() {
   return (
     <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">

@@ -27,16 +27,23 @@ export function buildWorkbenchRefreshSignature(params: {
         account.quotaError?.timestamp ?? 0,
         account.quotaSummary?.hourlyPercentage ?? "",
         account.quotaSummary?.hourlyResetTime ?? "",
+        account.quotaSummary?.hourlyRequestsLeft ?? "",
+        account.quotaSummary?.hourlyRequestsLimit ?? "",
         account.quotaSummary?.hourlyWindowMinutes ?? "",
         account.quotaSummary?.hourlyWindowPresent ? "1" : "0",
         account.quotaSummary?.weeklyPercentage ?? "",
         account.quotaSummary?.weeklyResetTime ?? "",
+        account.quotaSummary?.weeklyRequestsLeft ?? "",
+        account.quotaSummary?.weeklyRequestsLimit ?? "",
         account.quotaSummary?.weeklyWindowMinutes ?? "",
         account.quotaSummary?.weeklyWindowPresent ? "1" : "0",
-        account.quotaSummary?.codeReviewPercentage ?? "",
-        account.quotaSummary?.codeReviewResetTime ?? "",
-        account.quotaSummary?.codeReviewWindowMinutes ?? "",
-        account.quotaSummary?.codeReviewWindowPresent ? "1" : "0"
+        account.quotaSummary?.credits?.balance ?? "",
+        account.quotaSummary?.additionalRateLimits
+          ?.map(
+            (limit) =>
+              `${limit.limitName}:${limit.hourlyPercentage ?? ""}:${limit.hourlyResetTime ?? ""}:${limit.weeklyPercentage ?? ""}:${limit.weeklyResetTime ?? ""}`
+          )
+          .join(",") ?? ""
       ].join(":")
     )
     .join("|");

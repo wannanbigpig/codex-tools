@@ -1,0 +1,162 @@
+{
+  "version": "1.0",
+  "announcements": [
+    {
+      "id": "ann-2026-04-codex-tools-0-1-6-quota-sync",
+      "type": "feature",
+      "priority": 400,
+      "releaseVersion": "0.1.6",
+      "title": "Codex Accounts Manager 0.1.6 配额与同步更新",
+      "summary": "本次更新优化额外模型额度、剩余额度、账号同步、调试日志和 Aideck 兼容。",
+      "content": "本次更新聚焦配额真实性、账号同步和排查体验。\n1. 额外模型额度：显示 additional_rate_limits 中的 GPT-5.3-Codex-Spark 5小时/每周等真实额度，并兼容旧缓存 rawData 回填。\n2. 移除代码审查额度：不再显示已为空的 code_review_rate_limit，避免把每周额度误当代码审查额度。\n3. 剩余额度展示：按 Aideck Codex 展示 credits 的剩余额度；没有真实 credits 时不显示占位或假数据。\n4. 同步账号信息增强：手动同步会刷新 profile、用户名、工作区、订阅时间和配额。\n5. 调试日志完整输出：网络调试日志保留完整响应体，并继续脱敏邮箱、token 和 user id。\n6. Aideck 兼容修复：账号存储和 token 读写继续对齐 Aideck，减少两个应用同时运行时状态不一致。",
+      "action": {
+        "type": "url",
+        "target": "https://github.com/wannanbigpig/codex-tools",
+        "label": "查看项目"
+      },
+      "targetVersions": "*",
+      "targetLanguages": [
+        "*"
+      ],
+      "showOnce": true,
+      "popup": true,
+      "pinned": true,
+      "createdAt": "2026-04-27T08:00:00Z",
+      "expiresAt": null,
+      "locales": {
+        "en": {
+          "title": "Codex Accounts Manager 0.1.6 quota and sync update",
+          "summary": "This update improves extra model quotas, remaining credits, account sync, debug logs, and Aideck compatibility.",
+          "content": "This update focuses on quota correctness, account sync, and debugging.\n1. Extra model quotas: displays real additional_rate_limits such as GPT-5.3-Codex-Spark 5-hour/weekly quotas and backfills them from old rawData caches.\n2. Code review quota removed: no longer shows empty code_review_rate_limit data or treats weekly quota as code review quota.\n3. Remaining credits: displays credits like Aideck Codex; no placeholder or fake value is shown when real credits are missing.\n4. Account sync: manual sync refreshes profile, username, workspace, subscription time, and quota.\n5. Full debug logs: network debug logs keep the full response body while still redacting emails, tokens, and user ids.\n6. Aideck compatibility: account storage and token read/write stay aligned with Aideck to reduce mismatched state when both apps run.",
+          "actionLabel": "View project"
+        },
+        "zh": {
+          "title": "Codex Accounts Manager 0.1.6 配额与同步更新",
+          "summary": "本次更新优化额外模型额度、剩余额度、账号同步、调试日志和 Aideck 兼容。",
+          "content": "本次更新聚焦配额真实性、账号同步和排查体验。\n1. 额外模型额度：显示 additional_rate_limits 中的 GPT-5.3-Codex-Spark 5小时/每周等真实额度，并兼容旧缓存 rawData 回填。\n2. 移除代码审查额度：不再显示已为空的 code_review_rate_limit，避免把每周额度误当代码审查额度。\n3. 剩余额度展示：按 Aideck Codex 展示 credits 的剩余额度；没有真实 credits 时不显示占位或假数据。\n4. 同步账号信息增强：手动同步会刷新 profile、用户名、工作区、订阅时间和配额。\n5. 调试日志完整输出：网络调试日志保留完整响应体，并继续脱敏邮箱、token 和 user id。\n6. Aideck 兼容修复：账号存储和 token 读写继续对齐 Aideck，减少两个应用同时运行时状态不一致。",
+          "actionLabel": "查看项目"
+        },
+        "ja": {
+          "title": "Codex Accounts Manager 0.1.6 クォータと同期の更新",
+          "summary": "追加モデルクォータ、残りクレジット、アカウント同期、デバッグログ、Aideck 互換性を改善しました。",
+          "content": "今回の更新はクォータの正確性、アカウント同期、調査しやすさを改善します。\n1. 追加モデルクォータ：additional_rate_limits の GPT-5.3-Codex-Spark 5 時間/週間などの実データを表示し、古い rawData キャッシュからも補完します。\n2. コードレビュークォータ削除：空の code_review_rate_limit を表示せず、週間クォータを誤ってコードレビュー扱いしません。\n3. 残りクレジット：Aideck Codex と同様に credits を表示し、実データがない場合はプレースホルダーや偽データを出しません。\n4. アカウント同期：手動同期で profile、ユーザー名、ワークスペース、契約期間、クォータを更新します。\n5. 完全なデバッグログ：ネットワークログはレスポンス全文を保持し、email、token、user id は引き続きマスクします。\n6. Aideck 互換性：アカウント保存と token 読み書きを Aideck に合わせ、両方を起動した時の状態ズレを減らします。",
+          "actionLabel": "プロジェクトを見る"
+        },
+        "es": {
+          "title": "Codex Accounts Manager 0.1.6: cuotas y sincronización",
+          "summary": "Mejora cuotas de modelos extra, créditos restantes, sincronización de cuentas, logs de depuración y compatibilidad Aideck.",
+          "content": "Esta actualización se centra en cuotas reales, sincronización de cuentas y diagnóstico.\n1. Cuotas de modelos extra: muestra additional_rate_limits reales como GPT-5.3-Codex-Spark de 5 horas/semanal y las recupera desde rawData antiguo.\n2. Sin cuota de revisión: ya no muestra code_review_rate_limit vacío ni trata la cuota semanal como revisión de código.\n3. Créditos restantes: muestra credits como Aideck Codex; sin datos reales no se muestran placeholders ni datos falsos.\n4. Sincronización: la sincronización manual actualiza profile, usuario, workspace, suscripción y cuota.\n5. Logs completos: los logs de red conservan el cuerpo completo y siguen ocultando email, token y user id.\n6. Compatibilidad Aideck: lectura/escritura de cuentas y token sigue alineada con Aideck para reducir estados distintos entre apps.",
+          "actionLabel": "Ver proyecto"
+        },
+        "de": {
+          "title": "Codex Accounts Manager 0.1.6: Quoten und Sync",
+          "summary": "Verbessert zusätzliche Modellquoten, Restguthaben, Account-Sync, Debug-Logs und Aideck-Kompatibilität.",
+          "content": "Dieses Update verbessert Quotengenauigkeit, Account-Sync und Diagnose.\n1. Zusätzliche Modellquoten: zeigt echte additional_rate_limits wie GPT-5.3-Codex-Spark 5 Stunden/Woche und ergänzt sie aus alten rawData-Caches.\n2. Code-Review-Quote entfernt: leere code_review_rate_limit wird nicht mehr angezeigt und Wochenquote nicht mehr als Review-Quote genutzt.\n3. Restguthaben: credits werden wie in Aideck Codex angezeigt; ohne echte Daten erscheinen keine Platzhalter oder Fake-Werte.\n4. Account-Sync: manuelle Synchronisierung aktualisiert profile, Benutzername, Workspace, Abo-Zeit und Quote.\n5. Vollständige Debug-Logs: Netzwerklogs behalten den vollständigen Body und maskieren weiterhin email, token und user id.\n6. Aideck-Kompatibilität: Account-Speicher und token Lesen/Schreiben bleiben an Aideck angeglichen, um Zustandsabweichungen zu reduzieren.",
+          "actionLabel": "Projekt ansehen"
+        },
+        "fr": {
+          "title": "Codex Accounts Manager 0.1.6 : quotas et synchronisation",
+          "summary": "Améliore les quotas de modèles supplémentaires, les crédits restants, la synchronisation, les logs et la compatibilité Aideck.",
+          "content": "Cette mise à jour améliore l'exactitude des quotas, la synchronisation et le diagnostic.\n1. Quotas de modèles supplémentaires : affiche les vrais additional_rate_limits comme GPT-5.3-Codex-Spark 5 heures/hebdo et les récupère depuis les anciens rawData.\n2. Quota de revue supprimé : n'affiche plus code_review_rate_limit vide et ne confond plus quota hebdo et revue de code.\n3. Crédits restants : affiche credits comme Aideck Codex ; sans données réelles, aucun placeholder ni fausse donnée n'est affiché.\n4. Synchronisation : la synchro manuelle actualise profile, nom utilisateur, workspace, abonnement et quotas.\n5. Logs complets : les logs réseau gardent le body complet tout en masquant email, token et user id.\n6. Compatibilité Aideck : stockage des comptes et lecture/écriture token restent alignés avec Aideck pour limiter les états divergents.",
+          "actionLabel": "Voir le projet"
+        },
+        "pt-br": {
+          "title": "Codex Accounts Manager 0.1.6: cotas e sincronização",
+          "summary": "Melhora cotas extras de modelo, créditos restantes, sincronização de contas, logs e compatibilidade Aideck.",
+          "content": "Esta atualização foca em cotas reais, sincronização de contas e diagnóstico.\n1. Cotas extras de modelo: mostra additional_rate_limits reais como GPT-5.3-Codex-Spark 5 horas/semanal e recupera de caches rawData antigos.\n2. Sem cota de review: não mostra code_review_rate_limit vazio nem trata cota semanal como review de código.\n3. Créditos restantes: mostra credits como Aideck Codex; sem dados reais, não há placeholder nem dado falso.\n4. Sincronização: a sincronização manual atualiza profile, usuário, workspace, assinatura e cota.\n5. Logs completos: logs de rede mantêm o body completo e continuam mascarando email, token e user id.\n6. Compatibilidade Aideck: armazenamento de contas e leitura/escrita de token seguem alinhados ao Aideck para reduzir estados diferentes.",
+          "actionLabel": "Ver projeto"
+        },
+        "ru": {
+          "title": "Codex Accounts Manager 0.1.6: квоты и синхронизация",
+          "summary": "Улучшены дополнительные квоты моделей, остаток кредитов, синхронизация аккаунтов, debug logs и совместимость Aideck.",
+          "content": "Обновление посвящено достоверным квотам, синхронизации аккаунтов и диагностике.\n1. Дополнительные квоты моделей: отображаются реальные additional_rate_limits, например GPT-5.3-Codex-Spark 5 часов/неделя, с восстановлением из старого rawData.\n2. Убрана квота code review: пустой code_review_rate_limit больше не показывается, недельная квота не считается code review.\n3. Остаток кредитов: credits отображаются как в Aideck Codex; если реальных данных нет, плейсхолдеры и фальшивые значения не показываются.\n4. Синхронизация: ручная синхронизация обновляет profile, имя, workspace, срок подписки и квоты.\n5. Полные debug logs: сетевые логи сохраняют полный body и маскируют email, token и user id.\n6. Совместимость Aideck: хранение аккаунтов и чтение/запись token согласованы с Aideck, чтобы уменьшить расхождения состояний.",
+          "actionLabel": "Открыть проект"
+        },
+        "ko": {
+          "title": "Codex Accounts Manager 0.1.6 quota 및 동기화 업데이트",
+          "summary": "추가 모델 quota, 남은 credits, 계정 동기화, debug logs, Aideck 호환성을 개선했습니다.",
+          "content": "이번 업데이트는 quota 정확성, 계정 동기화, 디버깅 경험에 집중했습니다.\n1. 추가 모델 quota: additional_rate_limits의 GPT-5.3-Codex-Spark 5시간/주간 등 실제 quota를 표시하고 오래된 rawData 캐시에서도 보완합니다.\n2. 코드 리뷰 quota 제거: 비어 있는 code_review_rate_limit를 표시하지 않고 주간 quota를 코드 리뷰 quota로 오인하지 않습니다.\n3. 남은 credits: Aideck Codex처럼 credits를 표시하며 실제 데이터가 없으면 placeholder나 가짜 데이터를 표시하지 않습니다.\n4. 계정 동기화: 수동 동기화가 profile, 사용자 이름, workspace, 구독 시간, quota를 새로고칩니다.\n5. 전체 debug logs: 네트워크 로그는 전체 body를 보존하고 email, token, user id는 계속 마스킹합니다.\n6. Aideck 호환성: 계정 저장과 token 읽기/쓰기를 Aideck와 맞춰 두 앱을 같이 실행할 때 상태 차이를 줄입니다.",
+          "actionLabel": "프로젝트 보기"
+        },
+        "it": {
+          "title": "Codex Accounts Manager 0.1.6: quote e sincronizzazione",
+          "summary": "Migliora quote modello extra, crediti residui, sincronizzazione account, debug logs e compatibilità Aideck.",
+          "content": "Questo aggiornamento migliora correttezza delle quote, sync account e debug.\n1. Quote modello extra: mostra additional_rate_limits reali come GPT-5.3-Codex-Spark 5 ore/settimanale e li recupera da vecchie cache rawData.\n2. Quota code review rimossa: non mostra code_review_rate_limit vuoto e non usa la quota settimanale come code review.\n3. Crediti residui: mostra credits come Aideck Codex; senza dati reali non mostra placeholder o dati falsi.\n4. Sincronizzazione: la sync manuale aggiorna profile, nome utente, workspace, abbonamento e quote.\n5. Debug logs completi: i log di rete mantengono il body completo e mascherano email, token e user id.\n6. Compatibilità Aideck: storage account e lettura/scrittura token restano allineati ad Aideck per ridurre stati divergenti.",
+          "actionLabel": "Vedi progetto"
+        },
+        "zh-hant": {
+          "title": "Codex Accounts Manager 0.1.6 配額與同步更新",
+          "summary": "本次更新優化額外模型配額、剩餘額度、帳號同步、偵錯日誌和 Aideck 相容。",
+          "content": "本次更新聚焦配額真實性、帳號同步和排查體驗。\n1. 額外模型配額：顯示 additional_rate_limits 中的 GPT-5.3-Codex-Spark 5 小時/每週等真實配額，並相容舊快取 rawData 回填。\n2. 移除程式碼審查配額：不再顯示已為空的 code_review_rate_limit，避免把每週配額誤當程式碼審查配額。\n3. 剩餘額度顯示：按 Aideck Codex 顯示 credits 的剩餘額度；沒有真實 credits 時不顯示佔位或假資料。\n4. 同步帳號資訊增強：手動同步會刷新 profile、使用者名稱、工作空間、訂閱時間和配額。\n5. 偵錯日誌完整輸出：網路偵錯日誌保留完整回應內容，並繼續遮蔽 email、token 和 user id。\n6. Aideck 相容修復：帳號儲存和 token 讀寫繼續對齊 Aideck，減少兩個應用同時執行時狀態不一致。",
+          "actionLabel": "查看專案"
+        },
+        "tr": {
+          "title": "Codex Accounts Manager 0.1.6 kota ve senkronizasyon güncellemesi",
+          "summary": "Ek model kotaları, kalan credits, hesap senkronizasyonu, debug logs ve Aideck uyumluluğu iyileştirildi.",
+          "content": "Bu güncelleme kota doğruluğu, hesap senkronizasyonu ve hata ayıklama deneyimine odaklanır.\n1. Ek model kotaları: additional_rate_limits içindeki GPT-5.3-Codex-Spark 5 saat/haftalık gibi gerçek kotaları gösterir ve eski rawData önbelleklerinden tamamlar.\n2. Code review kotası kaldırıldı: boş code_review_rate_limit artık gösterilmez ve haftalık kota code review kotası sayılmaz.\n3. Kalan credits: credits Aideck Codex gibi gösterilir; gerçek veri yoksa placeholder veya sahte veri gösterilmez.\n4. Hesap senkronizasyonu: manuel senkronizasyon profile, kullanıcı adı, workspace, abonelik süresi ve kotayı yeniler.\n5. Tam debug logs: ağ logları tam body içeriğini korur ve email, token, user id alanlarını maskelemeye devam eder.\n6. Aideck uyumluluğu: hesap depolama ve token okuma/yazma Aideck ile uyumlu kalarak iki uygulama çalışırken durum farklarını azaltır.",
+          "actionLabel": "Projeyi görüntüle"
+        },
+        "pl": {
+          "title": "Codex Accounts Manager 0.1.6: limity i synchronizacja",
+          "summary": "Ulepsza dodatkowe limity modeli, pozostałe credits, synchronizację kont, debug logs i zgodność Aideck.",
+          "content": "Aktualizacja skupia się na wiarygodnych limitach, synchronizacji kont i diagnostyce.\n1. Dodatkowe limity modeli: pokazuje prawdziwe additional_rate_limits, np. GPT-5.3-Codex-Spark 5 godzin/tydzień, i odtwarza je ze starych rawData.\n2. Usunięto limit code review: pusty code_review_rate_limit nie jest już wyświetlany, a limit tygodniowy nie jest traktowany jako code review.\n3. Pozostałe credits: credits są pokazywane jak w Aideck Codex; bez prawdziwych danych nie ma placeholderów ani fałszywych wartości.\n4. Synchronizacja kont: ręczna synchronizacja odświeża profile, nazwę użytkownika, workspace, subskrypcję i limity.\n5. Pełne debug logs: logi sieci zachowują pełny body i nadal maskują email, token oraz user id.\n6. Zgodność Aideck: zapis kont oraz odczyt/zapis token pozostają zgodne z Aideck, aby ograniczyć różne stany między aplikacjami.",
+          "actionLabel": "Zobacz projekt"
+        },
+        "cs": {
+          "title": "Codex Accounts Manager 0.1.6: kvóty a synchronizace",
+          "summary": "Vylepšuje další modelové kvóty, zbývající credits, synchronizaci účtů, debug logs a kompatibilitu Aideck.",
+          "content": "Tato aktualizace zlepšuje pravdivost kvót, synchronizaci účtů a diagnostiku.\n1. Další modelové kvóty: zobrazuje skutečné additional_rate_limits jako GPT-5.3-Codex-Spark 5 hodin/týden a doplňuje je ze starých rawData cache.\n2. Odstraněna code review kvóta: prázdné code_review_rate_limit se nezobrazuje a týdenní kvóta se nepoužívá jako code review.\n3. Zbývající credits: credits se zobrazují jako v Aideck Codex; bez skutečných dat se nezobrazí placeholdery ani falešné hodnoty.\n4. Synchronizace účtů: ruční synchronizace obnoví profile, uživatelské jméno, workspace, předplatné a kvóty.\n5. Úplné debug logs: síťové logy zachovají celé body a dál maskují email, token a user id.\n6. Kompatibilita Aideck: ukládání účtů a čtení/zápis token zůstávají sladěné s Aideck, aby se omezily rozdíly stavů.",
+          "actionLabel": "Zobrazit projekt"
+        },
+        "ar": {
+          "title": "تحديث الحصص والمزامنة في Codex Accounts Manager 0.1.6",
+          "summary": "يحسن حصص النماذج الإضافية والرصيد المتبقي ومزامنة الحسابات وسجلات debug logs وتوافق Aideck.",
+          "content": "يركز هذا التحديث على دقة الحصص ومزامنة الحسابات وسهولة التشخيص.\n1. حصص النماذج الإضافية: عرض additional_rate_limits الحقيقية مثل GPT-5.3-Codex-Spark لخمس ساعات/أسبوع، مع الاسترجاع من rawData القديمة.\n2. إزالة حصة مراجعة الكود: لم يعد يتم عرض code_review_rate_limit الفارغ أو اعتبار الحصة الأسبوعية حصة مراجعة كود.\n3. الرصيد المتبقي: عرض credits مثل Aideck Codex؛ عند عدم وجود بيانات حقيقية لا يتم عرض عناصر بديلة أو بيانات وهمية.\n4. مزامنة الحساب: المزامنة اليدوية تحدث profile واسم المستخدم وworkspace ووقت الاشتراك والحصص.\n5. سجلات كاملة: سجلات الشبكة تحتفظ بكامل body مع استمرار إخفاء email وtoken وuser id.\n6. توافق Aideck: تخزين الحسابات وقراءة/كتابة token تبقى متوافقة مع Aideck لتقليل اختلاف الحالة بين التطبيقين.",
+          "actionLabel": "عرض المشروع"
+        },
+        "vi": {
+          "title": "Codex Accounts Manager 0.1.6: cập nhật quota và đồng bộ",
+          "summary": "Cải thiện quota model bổ sung, credits còn lại, đồng bộ tài khoản, debug logs và tương thích Aideck.",
+          "content": "Bản cập nhật này tập trung vào quota chính xác, đồng bộ tài khoản và khả năng chẩn đoán.\n1. Quota model bổ sung: hiển thị additional_rate_limits thật như GPT-5.3-Codex-Spark 5 giờ/tuần và phục hồi từ cache rawData cũ.\n2. Bỏ quota code review: không hiển thị code_review_rate_limit rỗng và không coi quota tuần là quota code review.\n3. Credits còn lại: hiển thị credits như Aideck Codex; nếu không có dữ liệu thật thì không hiển thị placeholder hoặc dữ liệu giả.\n4. Đồng bộ tài khoản: đồng bộ thủ công sẽ làm mới profile, tên người dùng, workspace, thời gian đăng ký và quota.\n5. Debug logs đầy đủ: log mạng giữ toàn bộ body và vẫn che email, token, user id.\n6. Tương thích Aideck: lưu trữ tài khoản và đọc/ghi token tiếp tục đồng bộ với Aideck để giảm lệch trạng thái khi chạy cả hai ứng dụng.",
+          "actionLabel": "Xem dự án"
+        }
+      }
+    },
+    {
+      "id": "ann-2026-04-welcome-codex-tools",
+      "type": "info",
+      "priority": 100,
+      "title": "欢迎使用 Codex Accounts Manager",
+      "summary": "多 Codex 账号管理、配额查看与快速切换能力已就绪。",
+      "content": "感谢使用 Codex Accounts Manager。\n\n这里会展示项目公告、重要更新和需要你关注的消息。",
+      "action": {
+        "type": "url",
+        "target": "https://github.com/wannanbigpig/codex-tools",
+        "label": "查看项目"
+      },
+      "targetVersions": "*",
+      "targetLanguages": [
+        "*"
+      ],
+      "showOnce": true,
+      "popup": false,
+      "pinned": false,
+      "createdAt": "2026-04-27T00:00:00Z",
+      "expiresAt": null,
+      "locales": {
+        "en-US": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "zh-CN": {
+          "title": "欢迎使用 Codex Accounts Manager",
+          "summary": "多 Codex 账号管理、配额查看与快速切换能力已就绪。",
+          "content": "感谢使用 Codex Accounts Manager。\n\n这里会展示项目公告、重要更新和需要你关注的消息。",
+          "actionLabel": "查看项目"
+        }
+      }
+    }
+  ]
+}

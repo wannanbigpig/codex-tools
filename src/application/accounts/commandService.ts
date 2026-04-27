@@ -32,7 +32,8 @@ import {
 
 const CODEX_APP_RESTART_MODE = "codexAppRestartMode";
 const CODEX_APP_RESTART_ENABLED = "codexAppRestartEnabled";
-const REFRESH_ALL_CONCURRENCY = 4;
+const REFRESH_ALL_CONCURRENCY = 1;
+const REFRESH_ALL_DELAY_MS = 300;
 
 export class AccountsCommandService {
   constructor(
@@ -215,22 +216,27 @@ export class AccountsCommandService {
     const accounts = await this.repo.listAccounts();
     const refreshAll = async (progress?: vscode.Progress<{ message?: string; increment?: number }>) => {
       let started = 0;
-      await runWithConcurrencyLimit(accounts, REFRESH_ALL_CONCURRENCY, async (account) => {
-        started += 1;
-        progress?.report({ message: copy.refreshingStep(started, accounts.length, account.email) });
-        if (options?.silent) {
-          await refreshSingleQuotaSafely(this.repo, this.view, account.id, {
-            forceRefresh: options.forceRefresh
+      await runWithConcurrencyLimit(
+        accounts,
+        REFRESH_ALL_CONCURRENCY,
+        async (account) => {
+          started += 1;
+          progress?.report({ message: copy.refreshingStep(started, accounts.length, account.email) });
+          if (options?.silent) {
+            await refreshSingleQuotaSafely(this.repo, this.view, account.id, {
+              forceRefresh: options.forceRefresh
+            });
+            return;
+          }
+          await refreshSingleQuota(this.repo, this.view, account.id, {
+            announce: false,
+            forceRefresh: options?.forceRefresh ?? true,
+            refreshView: false,
+            warnQuota: false
           });
-          return;
-        }
-        await refreshSingleQuota(this.repo, this.view, account.id, {
-          announce: false,
-          forceRefresh: options?.forceRefresh ?? true,
-          refreshView: false,
-          warnQuota: false
-        });
-      });
+        },
+        { delayMs: REFRESH_ALL_DELAY_MS }
+      );
     };
 
     if (options?.silent) {

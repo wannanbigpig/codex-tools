@@ -5,7 +5,7 @@ import type {
   DashboardSettings,
   DashboardState
 } from "../../src/domain/dashboard/types";
-import { clampPercent, colorForPercentage, formatPercent, formatResetLabel } from "./helpers";
+import { clampPercent, colorForPercentage, formatPercent, formatRequestsLabel, formatResetLabel } from "./helpers";
 
 export function renderHealthPill(account: DashboardAccountViewModel) {
   if (account.dismissedHealth) {
@@ -64,6 +64,8 @@ export function MetricRow(props: {
   const color = colorForPercentage(props.metric.percentage, props.settings);
   const percentStyle = { "--metric-color": color } as Record<string, string>;
   const barStyle = { width: `${clamped}%`, "--metric-color": color } as Record<string, string>;
+  const requestsLabel = formatRequestsLabel(props.metric.requestsLeft, props.metric.requestsLimit);
+  const resetLabel = formatResetLabel(props.metric.resetAt, props.copy.resetUnknown, props.now, props.lang);
 
   return (
     <div class="row">
@@ -78,7 +80,10 @@ export function MetricRow(props: {
       <div class="bar">
         <span style={barStyle}></span>
       </div>
-      <div class="foot">{formatResetLabel(props.metric.resetAt, props.copy.resetUnknown, props.now, props.lang)}</div>
+      <div class="foot">
+        {requestsLabel ? <span>{requestsLabel}</span> : null}
+        <span>{resetLabel}</span>
+      </div>
     </div>
   );
 }

@@ -2,7 +2,7 @@
   "name": "codex-accounts-manager",
   "displayName": "Codex Accounts Manager",
   "description": "Manage multiple Codex accounts in VS Code, inspect quota, and switch the active global auth.json.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "wannanbigpig",
   "icon": "media/CT_logo_transparent_square_hd.png",
   "license": "MIT",
@@ -37,6 +37,16 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Whether Codex Accounts Manager should manage Codex App when switching accounts. Turn this off to skip restart prompts and app handling entirely."
+        },
+        "codexAccounts.dashboardTheme": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "dark",
+            "light"
+          ],
+          "default": "auto",
+          "markdownDescription": "Theme used by the Codex Accounts dashboard. `auto` follows the current VS Code color theme."
         },
         "codexAccounts.displayLanguage": {
           "type": "string",
@@ -120,11 +130,6 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Optional custom path to the Codex desktop app. If empty, the extension uses built-in platform-specific detection."
-        },
-        "codexAccounts.showCodeReviewQuota": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Show Code Review quota in the dashboard."
         },
         "codexAccounts.quotaWarningEnabled": {
           "type": "boolean",

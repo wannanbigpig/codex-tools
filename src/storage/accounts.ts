@@ -74,9 +74,10 @@ import {
 import { fetchRemoteAccountProfile } from "../services/profile";
 import { clearQuotaCacheForAccount } from "../services/quota";
 import { buildAccountStorageId } from "../utils/accountIdentity";
-import { extractClaims } from "../utils/jwt";
+import { extractClaims, isTokenExpired } from "../utils/jwt";
 import { getQuotaIssueKind } from "../utils/quotaIssue";
 import { AccountError, StorageError, createError, ErrorCode } from "../core/errors";
+import { mirrorAideckCodexAccount, mirrorAideckCurrentAccount, readAideckCodexTokens } from "./aideckCodexStorage";
 
 /** 缓存失效时间 (毫秒) */
 const CACHE_TTL_MS = 5000;
@@ -293,6 +294,7 @@ export class AccountsRepository {
     };
 
     await this.secretStore.setTokens(accountId, effectiveTokens);
+    await mirrorAideckCodexAccount(account, effectiveTokens);
 
     let shouldWriteIndex = false;
     if (effectiveTokens.accountId && effectiveTokens.accountId !== account.accountId) {
@@ -313,6 +315,7 @@ export class AccountsRepository {
         ...effectiveTokens,
         accountId: account.accountId ?? effectiveTokens.accountId
       });
+      await mirrorAideckCurrentAccount(accountId);
     }
 
     if (shouldWriteIndex) {
@@ -329,14 +332,14 @@ export class AccountsRepository {
       throw createError.accountNotFound(accountId);
     }
 
-    const tokens = await this.secretStore.getTokens(accountId);
+    const tokens = await this.getTokens(accountId);
     if (!tokens) {
       throw new AccountError(`Tokens missing for account ${account.email}`, {
         code: ErrorCode.AUTH_TOKEN_MISSING
       });
     }
 
-    const remoteProfile = await fetchRemoteAccountProfile(tokens);
+    const remoteProfile = await fetchRemoteAccountProfile(tokens, { forceRefresh: true });
     if (!remoteProfile) {
       throw new AccountError(`No remote profile returned for ${account.email}`, {
         code: ErrorCode.ACCOUNT_INVALID_DATA
@@ -346,6 +349,7 @@ export class AccountsRepository {
     if (applyRemoteProfileFromTokens({ account, tokens, remoteProfile, planType: account.planType })) {
       account.updatedAt = Date.now();
       account.dismissedHealthIssueKey = undefined;
+      await mirrorAideckCodexAccount(account, tokens);
       this.writeIndex(index);
     }
 
@@ -359,6 +363,7 @@ export class AccountsRepository {
       throw createError.accountNotFound(accountId);
     }
 
+    await mirrorAideckCodexAccount(account, await this.secretStore.getTokens(accountId));
     this.writeIndex(index);
     return account;
   }
@@ -370,6 +375,7 @@ export class AccountsRepository {
       throw createError.accountNotFound(accountId);
     }
 
+    await mirrorAideckCodexAccount(account, await this.secretStore.getTokens(accountId));
     this.writeIndex(index);
     return account;
   }
@@ -379,6 +385,9 @@ export class AccountsRepository {
     const updated = addAccountTagsToIndex(index, accountIds, tags, Date.now());
 
     if (updated.length > 0) {
+      await Promise.all(
+        updated.map(async (account) => mirrorAideckCodexAccount(account, await this.secretStore.getTokens(account.id)))
+      );
       this.writeIndex(index);
     }
 
@@ -390,6 +399,9 @@ export class AccountsRepository {
     const updated = removeAccountTagsFromIndex(index, accountIds, tags, Date.now());
 
     if (updated.length > 0) {
+      await Promise.all(
+        updated.map(async (account) => mirrorAideckCodexAccount(account, await this.secretStore.getTokens(account.id)))
+      );
       this.writeIndex(index);
     }
 
@@ -422,6 +434,7 @@ export class AccountsRepository {
       allowRecoveryWrite?: boolean;
       persistImmediately?: boolean;
       restoreSource?: CodexAccountsRestoreResult["source"];
+      addedVia?: CodexAccountRecord["addedVia"];
     } = {}
   ): Promise<CodexAccountRecord> {
     const claims = extractClaims(tokens.idToken, tokens.accessToken);
@@ -454,6 +467,7 @@ export class AccountsRepository {
       existing,
       existingAccounts: index.accounts,
       remoteProfile,
+      addedVia: options.addedVia ?? "oauth",
       forceActive,
       now
     });
@@ -467,10 +481,15 @@ export class AccountsRepository {
     }
 
     // 保存令牌
-    await this.secretStore.setTokens(id, {
+    const storedTokens = {
       ...tokens,
       accountId: account.accountId ?? tokens.accountId
-    });
+    };
+    await this.secretStore.setTokens(id, storedTokens);
+    await mirrorAideckCodexAccount(account, storedTokens);
+    if (account.isActive) {
+      await mirrorAideckCurrentAccount(id);
+    }
 
     if (options.persistImmediately) {
       await this.persistRecoveredIndex(index, options.restoreSource ?? "shared_json");
@@ -495,14 +514,17 @@ export class AccountsRepository {
       });
     }
 
-    return this.upsertFromTokens(
+    return this.upsertFromTokensInternal(
       {
         idToken: auth.tokens.id_token,
         accessToken: auth.tokens.access_token,
         refreshToken: auth.tokens.refresh_token,
         accountId: auth.tokens.account_id
       },
-      true
+      true,
+      {
+        addedVia: "local"
+      }
     );
   }
 
@@ -581,7 +603,8 @@ export class AccountsRepository {
       const restoredTokens = restoreSharedTokens(entry);
       const created = await this.upsertFromTokensInternal(restoredTokens, false, {
         allowRecoveryWrite: options.allowRecoveryWrite,
-        persistImmediately: false
+        persistImmediately: false,
+        addedVia: "json"
       });
       const index = options.allowRecoveryWrite ? await this.readIndexForRecovery() : await this.readIndex();
       const account = index.accounts.find((item) => item.id === created.id);
@@ -591,10 +614,12 @@ export class AccountsRepository {
 
       applySharedAccountEntry(account, entry);
 
-      await this.secretStore.setTokens(account.id, {
+      const storedTokens = {
         ...restoredTokens,
         accountId: account.accountId ?? restoredTokens.accountId
-      });
+      };
+      await this.secretStore.setTokens(account.id, storedTokens);
+      await mirrorAideckCodexAccount(account, storedTokens);
 
       if (options.persistImmediately) {
         await this.persistRecoveredIndex(index, options.restoreSource ?? "shared_json");
@@ -621,7 +646,7 @@ export class AccountsRepository {
       throw createError.accountNotFound(accountId);
     }
 
-    const tokens = await this.secretStore.getTokens(accountId);
+    const tokens = await this.getTokens(accountId);
     if (!tokens) {
       throw new AccountError(`Tokens missing for account ${account.email}`, {
         code: ErrorCode.AUTH_TOKEN_MISSING
@@ -629,16 +654,20 @@ export class AccountsRepository {
     }
 
     // 写入 auth.json
-    await writeAuthFile({
+    const effectiveTokens = {
       ...tokens,
       accountId: account.accountId ?? tokens.accountId
-    });
+    };
+
+    await writeAuthFile(effectiveTokens);
 
     const nextAccount = switchActiveAccount(index, accountId);
     if (!nextAccount) {
       throw createError.accountNotFound(accountId);
     }
 
+    await mirrorAideckCodexAccount(nextAccount, effectiveTokens);
+    await mirrorAideckCurrentAccount(accountId);
     this.writeIndex(index);
 
     return nextAccount;
@@ -692,7 +721,8 @@ export class AccountsRepository {
     quotaSummary?: CodexQuotaSummary,
     quotaError?: CodexAccountRecord["quotaError"],
     updatedTokens?: CodexTokens,
-    updatedPlanType?: string
+    updatedPlanType?: string,
+    updatedSubscriptionActiveUntil?: string
   ): Promise<CodexAccountRecord> {
     const index = await this.readIndex();
     const account = index.accounts.find((item) => item.id === accountId);
@@ -707,6 +737,7 @@ export class AccountsRepository {
       quotaSummary,
       quotaError,
       updatedPlanType,
+      updatedSubscriptionActiveUntil,
       now
     });
     const storedTokens = updatedTokens ?? (await this.secretStore.getTokens(accountId));
@@ -732,9 +763,17 @@ export class AccountsRepository {
         accountId: account.accountId ?? storedTokens.accountId
       };
       await this.secretStore.setTokens(accountId, effectiveNextTokens);
+      await mirrorAideckCodexAccount(account, effectiveNextTokens);
       if (account.isActive) {
         await writeAuthFile(effectiveNextTokens);
+        await mirrorAideckCurrentAccount(accountId);
       }
+    }
+    if (storedTokens && !nextStoredTokens) {
+      await mirrorAideckCodexAccount(account, {
+        ...storedTokens,
+        accountId: account.accountId ?? storedTokens.accountId
+      });
     }
 
     this.writeIndex(index);
@@ -767,6 +806,8 @@ export class AccountsRepository {
 
         if (shouldSyncTokensFromAuthFile(storedTokens, nextTokens)) {
           await this.secretStore.setTokens(derivedId, nextTokens);
+          await mirrorAideckCodexAccount(account, nextTokens);
+          await mirrorAideckCurrentAccount(derivedId);
           clearQuotaCacheForAccount(derivedId);
 
           if (nextTokens.accountId && nextTokens.accountId !== account.accountId) {
@@ -945,6 +986,16 @@ function mergeExternalTokens(
     return current;
   }
 
+  if (
+    current?.accessToken &&
+    external.accessToken &&
+    current.accessToken !== external.accessToken &&
+    !isTokenExpired(current.accessToken, 0) &&
+    isTokenExpired(external.accessToken, 0)
+  ) {
+    return current;
+  }
+
   const merged: CodexTokens = {
     idToken: external.idToken ?? current?.idToken ?? "",
     accessToken: external.accessToken ?? current?.accessToken ?? "",
@@ -957,62 +1008,6 @@ function mergeExternalTokens(
   }
 
   return merged;
-}
-
-async function readAideckCodexTokens(accountId: string): Promise<Partial<CodexTokens> | undefined> {
-  const filePath = getAideckCodexAccountFilePath(accountId);
-  try {
-    const raw = await fs.readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const tokenSource = getRecord(parsed["tokens"]);
-    const idToken = readString(tokenSource?.["id_token"]) ?? readString(parsed["id_token"]);
-    const accessToken =
-      readString(tokenSource?.["access_token"]) ??
-      readString(parsed["access_token"]) ??
-      readString(parsed["token"]);
-    const refreshToken =
-      readString(tokenSource?.["refresh_token"]) ??
-      readString(parsed["refresh_token"]) ??
-      undefined;
-    const externalAccountId =
-      readString(tokenSource?.["account_id"]) ??
-      readString(parsed["account_id"]) ??
-      undefined;
-
-    if (!idToken && !accessToken && !refreshToken && !externalAccountId) {
-      return undefined;
-    }
-
-    return {
-      idToken,
-      accessToken,
-      refreshToken,
-      accountId: externalAccountId
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-function getAideckCodexAccountFilePath(accountId: string): string {
-  const envDataRoot = process.env["AIDECK_DATA_DIR"]?.trim();
-  const dataRoot = envDataRoot ? envDataRoot.replace(/^['"]|['"]$/g, "") : path.join(os.homedir(), ".ai_deck");
-  return path.join(dataRoot, "accounts", "codex", "accounts", `${accountId}.json`);
-}
-
-function getRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
-
-function readString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
 }
 
 /**

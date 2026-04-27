@@ -1,6 +1,6 @@
 import type { ComponentChildren } from "preact";
 import type { DashboardAccountViewModel, DashboardCopy, DashboardSettings, DashboardState } from "../../src/domain/dashboard/types";
-import { getIntlLocale } from "../../src/localization/languages";
+import { formatResetRelativeTime } from "../../src/utils/resetTime";
 
 type SensitiveKind = "email" | "id" | "name";
 
@@ -38,19 +38,27 @@ export function clampPercent(value?: number): number {
 
 export function colorForPercentage(value: number | undefined, settings: DashboardSettings): string {
   if (typeof value !== "number" || Number.isNaN(value)) {
-    return "#7ddc7a";
+    return "#2a6e3f";
   }
   if (value >= settings.quotaGreenThreshold) {
-    return "#7ddc7a";
+    return "#2a6e3f";
   }
   if (value >= settings.quotaYellowThreshold) {
-    return "#fbbf24";
+    return "#e18a3b";
   }
-  return "#ef4444";
+  return "#c12c1f";
 }
 
 export function formatPercent(value?: number): string {
   return typeof value === "number" ? `${value}%` : "--";
+}
+
+export function formatRequestsLabel(requestsLeft?: number, requestsLimit?: number): string {
+  if (typeof requestsLeft !== "number" || typeof requestsLimit !== "number") {
+    return "";
+  }
+
+  return `${requestsLeft} / ${requestsLimit}`;
 }
 
 export function formatTimestamp(epochMs: number | undefined, fallback: string): string {
@@ -77,7 +85,7 @@ export function formatResetLabel(
   const hour = String(target.getHours()).padStart(2, "0");
   const minute = String(target.getMinutes()).padStart(2, "0");
 
-  return `${formatRelativeReset(resetAt, now, lang)} (${month}/${day} ${hour}:${minute})`;
+  return `${formatResetRelativeTime(resetAt, now, lang)} (${month}/${day} ${hour}:${minute})`;
 }
 
 export function formatTemplate(template: string, value: number | Record<string, string | number>): string {
@@ -273,39 +281,6 @@ function maskSensitiveString(value: string): string {
   }
 
   return `${value.slice(0, 3)}***${value.slice(-3)}`;
-}
-
-function formatRelativeReset(resetAt: number, now: number, lang: DashboardState["lang"]): string {
-  const deltaMs = resetAt * 1000 - now;
-  const abs = Math.abs(deltaMs);
-  const minutes = Math.round(abs / 60_000);
-  const future = deltaMs >= 0;
-
-  if (minutes < 60) {
-    return relativeTime(lang, minutes, "m", future);
-  }
-
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) {
-    return relativeTime(lang, hours, "h", future);
-  }
-
-  const days = Math.round(hours / 24);
-  return relativeTime(lang, days, "d", future);
-}
-
-function relativeTime(lang: DashboardState["lang"], value: number, unit: "m" | "h" | "d", future: boolean): string {
-  const formatter = new Intl.RelativeTimeFormat(getIntlLocale(lang), {
-    numeric: "always",
-    style: "short"
-  });
-  const unitMap = {
-    m: "minute",
-    h: "hour",
-    d: "day"
-  } as const;
-
-  return formatter.format(future ? value : -value, unitMap[unit]);
 }
 
 function maskSensitiveValue(value: string, kind: SensitiveKind): string {

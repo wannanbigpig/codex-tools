@@ -30,6 +30,16 @@ const profileCache = new Map<string, ProfileCacheEntry>();
  * 远程账号档案信息
  */
 interface RemoteAccountProfile {
+  /** 用户邮箱 */
+  email?: string;
+  /** 用户 ID */
+  userId?: string;
+  /** 计划类型 */
+  planType?: string;
+  /** 组织 ID */
+  organizationId?: string;
+  /** 订阅到期时间 */
+  subscriptionActiveUntil?: string;
   /** 账号名称 */
   accountName?: string;
   /** 账号结构类型 */
@@ -51,13 +61,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @param tokens - 认证令牌
  * @returns 账号档案信息，获取失败时返回 undefined
  */
-export async function fetchRemoteAccountProfile(tokens: CodexTokens): Promise<RemoteAccountProfile | undefined> {
+export async function fetchRemoteAccountProfile(
+  tokens: CodexTokens,
+  options: { forceRefresh?: boolean } = {}
+): Promise<RemoteAccountProfile | undefined> {
   const claims = extractClaims(tokens.idToken, tokens.accessToken);
   const accountId = tokens.accountId ?? claims.accountId;
   pruneProfileCache();
   const cacheKey = buildProfileCacheKey(tokens.accessToken, accountId);
   const cached = profileCache.get(cacheKey);
-  if (cached) {
+  if (cached && !options.forceRefresh) {
     return cached.profile;
   }
 
@@ -134,7 +147,7 @@ async function requestAccountProfile(url: string, accessToken: string, accountId
         status: response.status,
         ok: response.ok,
         url,
-        bodyPreview: raw.slice(0, 1000)
+        bodyPreview: raw
       });
 
       return {
@@ -200,6 +213,15 @@ function parseAccountProfile(
   }
 
   return {
+    email: readField(payload, ["email"]) ?? readField(selected, ["email"]),
+    userId: readField(payload, ["user_id", "userId"]) ?? readField(selected, ["user_id", "userId"]),
+    planType: readField(payload, ["plan_type", "planType"]) ?? readField(selected, ["plan_type", "planType"]),
+    organizationId:
+      readField(selected, ["organization_id", "org_id", "workspace_id"]) ??
+      readField(payload, ["organization_id", "org_id"]),
+    subscriptionActiveUntil:
+      readScalarField(payload, ["subscription_active_until", "subscriptionActiveUntil", "chatgpt_subscription_active_until"]) ??
+      readScalarField(selected, ["subscription_active_until", "subscriptionActiveUntil", "chatgpt_subscription_active_until"]),
     accountName: readField(selected, [
       "name",
       "display_name",
@@ -271,6 +293,22 @@ function readField(record: Record<string, unknown> | undefined, keys: string[]):
     const value = record[key];
     if (typeof value === "string" && value.trim()) {
       return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function readScalarField(record: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  if (!record) {
+    return undefined;
+  }
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
     }
   }
   return undefined;

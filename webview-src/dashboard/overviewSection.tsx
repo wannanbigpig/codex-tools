@@ -33,15 +33,17 @@ export function OverviewSection(props: {
   const { account, copy, settings, now, hasAccounts, privacyMode } = props;
   const emptyTitle = hasAccounts ? copy.noActiveAccountTitle : copy.empty;
   const emptySub = hasAccounts ? copy.noActiveAccountSub : copy.savedAccountsSub;
+  const teamNameDisplay =
+    account?.isTeamWorkspace && account.accountName?.trim()
+      ? getSensitiveDisplayValue(account.accountName, privacyMode, "name", account.accountName)
+      : undefined;
 
   return (
     <div class="overview-shell">
       {account ? (
         <div class="overview-account">
           <div class="overview-account-email">{getSensitiveDisplayValue(account.email, privacyMode, "email")}</div>
-          <div class="overview-account-workspace">
-            {getSensitiveDisplayValue(account.accountName, privacyMode, "name", copy.unknown)}
-          </div>
+          {teamNameDisplay ? <div class="overview-account-workspace">{teamNameDisplay}</div> : null}
           {account.tags.length ? <div class="account-tag-row">{renderTagList(account.tags)}</div> : null}
           <div class="overview-account-tags">
             <span class="pill active">{copy.primaryAccount}</span>

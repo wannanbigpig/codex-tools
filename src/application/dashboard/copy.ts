@@ -120,7 +120,16 @@ export function getDashboardCopy(language: DashboardLanguage): DashboardCopy {
 }
 
 export function formatAuthProvider(value: string | undefined, language: DashboardLanguage): string {
-  const provider = value?.trim() ?? "OpenAI";
+  const rawProvider = value?.trim() ?? "OpenAI";
+  const provider =
+    {
+      google: "Google",
+      github: "GitHub",
+      microsoft: "Microsoft",
+      apple: "Apple",
+      password: "Password",
+      openai: "OpenAI"
+    }[rawProvider.toLowerCase()] ?? rawProvider;
   return `${provider} ${AUTH_PROVIDER_LOGIN_SUFFIX[language] ?? AUTH_PROVIDER_LOGIN_SUFFIX.en}`;
 }
 

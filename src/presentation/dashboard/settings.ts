@@ -3,7 +3,8 @@ import { getDashboardCopy } from "../../application/dashboard/copy";
 import type { DashboardSettingKey } from "../../domain/dashboard/types";
 import {
   ExtensionSettingsStore,
-  getCodexAccountsConfiguration
+  getCodexAccountsConfiguration,
+  normalizeDashboardTheme
 } from "../../infrastructure/config/extensionSettings";
 import { isDashboardLanguageOption } from "../../localization/languages";
 
@@ -15,10 +16,15 @@ export async function handleDashboardSettingUpdate(
   let updated = false;
 
   switch (key) {
+    case "dashboardTheme":
+      if (typeof value === "string") {
+        await config.update(key, normalizeDashboardTheme(value), vscode.ConfigurationTarget.Global);
+        updated = true;
+      }
+      break;
     case "codexAppRestartEnabled":
     case "autoSwitchEnabled":
     case "backgroundTokenRefreshEnabled":
-    case "showCodeReviewQuota":
     case "quotaWarningEnabled":
     case "debugNetwork":
     case "autoSwitchPreferSameEmail":

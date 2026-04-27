@@ -12,6 +12,7 @@ export function applyQuotaUpdate(params: {
   quotaSummary?: CodexQuotaSummary;
   quotaError?: CodexAccountRecord["quotaError"];
   updatedPlanType?: string;
+  updatedSubscriptionActiveUntil?: string;
   now: number;
 }): string | undefined {
   params.account.lastQuotaAt = params.now;
@@ -22,6 +23,9 @@ export function applyQuotaUpdate(params: {
 
   if (params.updatedPlanType) {
     params.account.planType = params.updatedPlanType;
+  }
+  if (params.updatedSubscriptionActiveUntil) {
+    params.account.subscriptionActiveUntil = params.updatedSubscriptionActiveUntil;
   }
 
   return params.account.planType;

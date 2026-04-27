@@ -62,6 +62,38 @@ describe("refreshSingleQuota token automation state", () => {
     expect(clearTokenAutomationErrorMock).toHaveBeenCalledWith(account.id);
   });
 
+  it("persists refreshed subscription metadata from quota refresh results", async () => {
+    const repo: QuotaRefreshRepo = {
+      getAccount: vi.fn(async () => account),
+      getTokens: vi.fn(async () => tokens),
+      updateQuota: vi.fn(async () => account)
+    };
+
+    refreshQuotaMock.mockResolvedValue({
+      quota: undefined,
+      error: undefined,
+      updatedTokens: tokens,
+      updatedPlanType: "pro",
+      updatedSubscriptionActiveUntil: "1800000000"
+    });
+
+    await refreshSingleQuota(repo as AccountsRepository, { refresh: vi.fn() }, account.id, {
+      announce: false,
+      refreshView: false,
+      warnQuota: false,
+      forceRefresh: true
+    });
+
+    expect(repo.updateQuota).toHaveBeenCalledWith(
+      account.id,
+      undefined,
+      undefined,
+      tokens,
+      "pro",
+      "1800000000"
+    );
+  });
+
   it("keeps automation error when refresh still fails", async () => {
     const repo: QuotaRefreshRepo = {
       getAccount: vi.fn(async () => account),

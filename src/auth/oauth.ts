@@ -68,7 +68,7 @@ export async function refreshTokens(refreshToken: string): Promise<CodexTokens> 
     ok: response.ok,
     status: response.status,
     hasRefreshToken: Boolean(refreshToken),
-    bodyPreview: raw.slice(0, 400)
+    bodyPreview: raw
   });
   if (!response.ok) {
     throw new APIError(`Token refresh failed: ${raw}`, {
@@ -308,7 +308,7 @@ async function exchangeCodeForTokens(code: string, verifier: string, redirectUri
     ok: response.ok,
     status: response.status,
     redirectUri,
-    bodyPreview: raw.slice(0, 400)
+    bodyPreview: raw
   });
   if (!response.ok) {
     throw new APIError(`Token exchange failed: ${raw}`, {

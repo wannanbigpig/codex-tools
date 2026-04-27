@@ -3,6 +3,7 @@ import type { DashboardCopy, DashboardSettings } from "../../src/domain/dashboar
 import {
   DASHBOARD_LANGUAGE_OPTIONS,
   DASHBOARD_LANGUAGE_OPTION_LABELS,
+  type DashboardLanguage,
   isDashboardLanguageOption
 } from "../../src/localization/languages";
 import {
@@ -41,6 +42,52 @@ export function SettingsLanguageBlock(props: {
         ))}
       </select>
       <div class="settings-note">{props.copy.languageNote}</div>
+    </div>
+  );
+}
+
+export function SettingsThemeBlock(props: {
+  lang: DashboardLanguage;
+  settings: DashboardSettings;
+  onChange: (value: DashboardSettings["dashboardTheme"]) => void;
+}) {
+  const zh = props.lang === "zh" || props.lang === "zh-hant";
+  const copy = zh
+    ? {
+        title: "主题",
+        dark: "深色",
+        light: "浅色",
+        auto: "跟随 VS Code"
+      }
+    : {
+        title: "Theme",
+        dark: "Dark",
+        light: "Light",
+        auto: "Follow VS Code"
+      };
+  const options: Array<{ value: DashboardSettings["dashboardTheme"]; label: string }> = [
+    { value: "dark", label: copy.dark },
+    { value: "light", label: copy.light },
+    { value: "auto", label: copy.auto }
+  ];
+
+  return (
+    <div class="settings-block settings-theme-block">
+      <div class="settings-theme-row">
+        <div class="settings-block-title">{copy.title}</div>
+        <div class="settings-theme-options">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              class={`settings-theme-option ${props.settings.dashboardTheme === option.value ? "active" : ""}`}
+              type="button"
+              onClick={() => props.onChange(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -138,7 +185,7 @@ export function SettingsPathBlock(props: {
         <div class="settings-block-title">{props.copy.appPathTitle}</div>
         <div class="settings-block-sub">{props.copy.appPathSub}</div>
       </div>
-      <div class="settings-note">{props.pathValue || props.copy.appPathEmpty}</div>
+      <div class="settings-note settings-path-note">{props.pathValue || props.copy.appPathEmpty}</div>
       <div class="saved-actions settings-inline-actions">
         <button type="button" onClick={props.onPick}>
           {props.copy.pickPath}

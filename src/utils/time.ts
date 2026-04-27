@@ -9,6 +9,7 @@
 
 import { getIntlLocale } from "../localization/languages";
 import { getLanguage, translate } from "./i18n";
+import { formatResetRelativeTime } from "./resetTime";
 
 /**
  * 格式化相对重置时间
@@ -24,22 +25,7 @@ export function formatRelativeReset(epochSeconds?: number): string {
     return translate("quota.resetUnknown");
   }
 
-  const deltaMs = epochSeconds * 1000 - Date.now();
-  const abs = Math.abs(deltaMs);
-  const minutes = Math.round(abs / 60000);
-  const future = deltaMs >= 0;
-
-  if (minutes < 60) {
-    return formatRelative(minutes, "m", future);
-  }
-
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) {
-    return formatRelative(hours, "h", future);
-  }
-
-  const days = Math.round(hours / 24);
-  return formatRelative(days, "d", future);
+  return formatResetRelativeTime(epochSeconds, Date.now(), getLanguage());
 }
 
 /**
@@ -56,20 +42,4 @@ export function formatTimestamp(epochMs?: number): string {
     return translate("common.never");
   }
   return new Date(epochMs).toLocaleString(getIntlLocale(getLanguage()));
-}
-
-/**
- * 格式化相对时间
- */
-function formatRelative(value: number, unit: "m" | "h" | "d", future: boolean): string {
-  if (unit === "m") {
-    return translate(future ? "time.minutesLeft" : "time.minutesAgo", { value });
-  }
-
-  if (unit === "h") {
-    return translate(future ? "time.hoursLeft" : "time.hoursAgo", { value });
-  }
-
-  // unit === "d"
-  return translate(future ? "time.daysLeft" : "time.daysAgo", { value });
 }

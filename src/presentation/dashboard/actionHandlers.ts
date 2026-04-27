@@ -11,6 +11,7 @@ import type {
 import type { CodexAccountRecord } from "../../core/types";
 import type { DashboardLanguage } from "../../localization/languages";
 import { AccountsRepository } from "../../storage";
+import { AnnouncementService, type AnnouncementOptions } from "../../services/announcements";
 import { runWithConcurrencyLimit } from "../../utils/concurrency";
 import { getCommandCopy, t } from "../../utils";
 import { clearAutoSwitchLock, setAutoSwitchLock } from "../workbench/autoSwitchState";
@@ -25,7 +26,12 @@ export type DashboardActionContext = {
   schedulePublishState: () => void;
   reloadShell: () => void;
   oauth: DashboardOAuthCoordinator;
+  announcements: AnnouncementService;
+  getAnnouncementOptions: () => AnnouncementOptions;
 };
+
+const CODEX_BATCH_REFRESH_CONCURRENCY = 1;
+const CODEX_BATCH_REFRESH_DELAY_MS = 300;
 
 export async function executeDashboardActionMessage(
   ctx: DashboardActionContext,
@@ -72,6 +78,18 @@ async function runDashboardAction(
       return undefined;
     case "refreshAll":
       await vscode.commands.executeCommand("codexAccounts.refreshAllQuotas");
+      return undefined;
+    case "refreshAnnouncements":
+      await ctx.announcements.forceRefresh(ctx.getAnnouncementOptions());
+      ctx.schedulePublishState();
+      return undefined;
+    case "markAnnouncementRead":
+      await ctx.announcements.markAsRead(payload?.announcementId ?? "");
+      ctx.schedulePublishState();
+      return undefined;
+    case "markAllAnnouncementsRead":
+      await ctx.announcements.markAllAsRead(ctx.getAnnouncementOptions());
+      ctx.schedulePublishState();
       return undefined;
     case "shareTokens":
       return handleShareTokens(ctx.repo, payload, translate);
@@ -120,7 +138,7 @@ async function runDashboardAction(
       return undefined;
     case "resyncProfile":
       if (account) {
-        await ctx.repo.refreshAccountProfileMetadata(account.id);
+        await resyncAccountInfo(ctx.repo, account.id);
         ctx.schedulePublishState();
       }
       return undefined;
@@ -425,25 +443,30 @@ async function handleBatchRefresh(
   let success = 0;
   let failed = 0;
   const failures: DashboardBatchResultFailure[] = [];
-  await runWithConcurrencyLimit(targetIds, 4, async (id) => {
-    try {
-      await refreshSingleQuota(repo, { refresh() {} }, id, {
-        announce: false,
-        forceRefresh: true,
-        refreshView: false,
-        warnQuota: false
-      });
-      success += 1;
-    } catch (error) {
-      failed += 1;
-      failures.push({
-        accountId: id,
-        email: accountsById.get(id)?.email,
-        message: toFailureMessage(error)
-      });
-      console.warn(`[codexAccounts] batch quota refresh failed for ${id}:`, error);
-    }
-  });
+  await runWithConcurrencyLimit(
+    targetIds,
+    CODEX_BATCH_REFRESH_CONCURRENCY,
+    async (id) => {
+      try {
+        await refreshSingleQuota(repo, { refresh() {} }, id, {
+          announce: false,
+          forceRefresh: true,
+          refreshView: false,
+          warnQuota: false
+        });
+        success += 1;
+      } catch (error) {
+        failed += 1;
+        failures.push({
+          accountId: id,
+          email: accountsById.get(id)?.email,
+          message: toFailureMessage(error)
+        });
+        console.warn(`[codexAccounts] batch quota refresh failed for ${id}:`, error);
+      }
+    },
+    { delayMs: CODEX_BATCH_REFRESH_DELAY_MS }
+  );
   schedulePublishState();
   const message = translate("message.batchRefreshSummary", {
     success,
@@ -477,7 +500,7 @@ async function handleBatchResync(
   const failures: DashboardBatchResultFailure[] = [];
   await runWithConcurrencyLimit(targetIds, 4, async (id) => {
     try {
-      await repo.refreshAccountProfileMetadata(id);
+      await resyncAccountInfo(repo, id);
       success += 1;
     } catch (error) {
       failed += 1;
@@ -488,7 +511,7 @@ async function handleBatchResync(
       });
       console.warn(`[codexAccounts] batch profile resync failed for ${id}:`, error);
     }
-  });
+  }, { delayMs: CODEX_BATCH_REFRESH_DELAY_MS });
   schedulePublishState();
   const message = translate("message.batchResyncSummary", {
     success,
@@ -507,6 +530,16 @@ async function handleBatchResync(
       failures
     }
   };
+}
+
+async function resyncAccountInfo(repo: AccountsRepository, accountId: string): Promise<void> {
+  await repo.refreshAccountProfileMetadata(accountId);
+  await refreshSingleQuota(repo, { refresh() {} }, accountId, {
+    announce: false,
+    forceRefresh: true,
+    refreshView: false,
+    warnQuota: false
+  });
 }
 
 async function handleBatchRemove(

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { CodexAccountRecord } from "../src/core/types";
 import { buildAccountStorageId } from "../src/utils/accountIdentity";
 import { cloneIndex, parseAccountsIndex, syncActiveAccountState } from "../src/storage/accountsIndex";
 import { buildAccountRecordDraft } from "../src/storage/accountMetadata";
@@ -20,8 +21,10 @@ import {
   fromSharedQuota,
   normalizeAccountTags,
   previewSharedEntry,
-  restoreSharedTokens
+  restoreSharedTokens,
+  toSharedAccountJson
 } from "../src/storage/sharedAccounts";
+import { applySharedAccountEntry } from "../src/storage/sharedAccountsImport";
 
 function createJwt(payload: Record<string, unknown>): string {
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -109,33 +112,127 @@ describe("sharedAccounts helpers", () => {
       fromSharedQuota({
         hourly_percentage: 40,
         hourly_reset_time: 100,
+        hourly_requests_left: 4,
+        hourly_requests_limit: 10,
         hourly_window_minutes: 300,
         hourly_window_present: true,
         weekly_percentage: 70,
         weekly_reset_time: 200,
+        weekly_requests_left: 7,
+        weekly_requests_limit: 10,
         weekly_window_minutes: 10080,
         weekly_window_present: true,
         code_review_percentage: 90,
         code_review_reset_time: 300,
+        code_review_requests_left: 9,
+        code_review_requests_limit: 10,
         code_review_window_minutes: 300,
         code_review_window_present: true,
+        additional_rate_limits: [
+          {
+            limit_name: "GPT-5.3-Codex-Spark",
+            metered_feature: "codex_bengalfox",
+            hourly_percentage: 100,
+            hourly_reset_time: 400,
+            hourly_window_minutes: 300,
+            hourly_window_present: true,
+            weekly_percentage: 90,
+            weekly_reset_time: 500,
+            weekly_window_minutes: 10080,
+            weekly_window_present: true
+          }
+        ],
+        credits: {
+          has_credits: false,
+          unlimited: false,
+          overage_limit_reached: false,
+          balance: "0",
+          approx_local_messages: [0, 0],
+          approx_cloud_messages: [0, 0]
+        },
         raw_data: { ok: true }
       })
     ).toEqual({
       hourlyPercentage: 40,
       hourlyResetTime: 100,
+      hourlyRequestsLeft: 4,
+      hourlyRequestsLimit: 10,
       hourlyWindowMinutes: 300,
       hourlyWindowPresent: true,
       weeklyPercentage: 70,
       weeklyResetTime: 200,
+      weeklyRequestsLeft: 7,
+      weeklyRequestsLimit: 10,
       weeklyWindowMinutes: 10080,
       weeklyWindowPresent: true,
       codeReviewPercentage: 90,
       codeReviewResetTime: 300,
+      codeReviewRequestsLeft: 9,
+      codeReviewRequestsLimit: 10,
       codeReviewWindowMinutes: 300,
       codeReviewWindowPresent: true,
+      additionalRateLimits: [
+        {
+          limitName: "GPT-5.3-Codex-Spark",
+          meteredFeature: "codex_bengalfox",
+          hourlyPercentage: 100,
+          hourlyResetTime: 400,
+          hourlyRequestsLeft: undefined,
+          hourlyRequestsLimit: undefined,
+          hourlyWindowMinutes: 300,
+          hourlyWindowPresent: true,
+          weeklyPercentage: 90,
+          weeklyResetTime: 500,
+          weeklyRequestsLeft: undefined,
+          weeklyRequestsLimit: undefined,
+          weeklyWindowMinutes: 10080,
+          weeklyWindowPresent: true
+        }
+      ],
+      credits: {
+        hasCredits: false,
+        unlimited: false,
+        overageLimitReached: false,
+        balance: "0",
+        approxLocalMessages: [0, 0],
+        approxCloudMessages: [0, 0]
+      },
       rawData: { ok: true }
     });
+  });
+
+  it("exports and imports subscription expiry metadata", () => {
+    const account: CodexAccountRecord = {
+      id: "a",
+      email: "dev@example.com",
+      userId: "user-1",
+      planType: "pro",
+      subscriptionActiveUntil: "1800000000",
+      isActive: false,
+      createdAt: 1_000,
+      updatedAt: 2_000
+    };
+    const shared = toSharedAccountJson(account, {
+      idToken: "id-token",
+      accessToken: "access-token",
+      refreshToken: "refresh-token"
+    });
+    const restored: CodexAccountRecord = {
+      id: "a",
+      email: "dev@example.com",
+      isActive: false,
+      createdAt: 1,
+      updatedAt: 1
+    };
+
+    expect(shared.subscription_active_until).toBe("1800000000");
+
+    applySharedAccountEntry(restored, {
+      ...shared,
+      subscription_active_until: "1900000000"
+    });
+
+    expect(restored.subscriptionActiveUntil).toBe("1900000000");
   });
 });
 
@@ -271,7 +368,7 @@ describe("accountProfileMaintenance helpers", () => {
         }
       })
     };
-    const account = {
+    const account: CodexAccountRecord = {
       id: "a",
       email: "team@example.com",
       isActive: false,
@@ -286,6 +383,7 @@ describe("accountProfileMaintenance helpers", () => {
       account,
       quotaSummary: { hourlyPercentage: 25, weeklyPercentage: 75, codeReviewPercentage: 50 },
       quotaError: { message: "quota ok", timestamp: 1 },
+      updatedSubscriptionActiveUntil: "1800000000",
       now: 88
     });
 
@@ -293,6 +391,7 @@ describe("accountProfileMaintenance helpers", () => {
 
     expect(effectivePlanType).toBe("team");
     expect(account.lastQuotaAt).toBe(88);
+    expect(account.subscriptionActiveUntil).toBe("1800000000");
     expect(account.loginAt).toBe(1_234_000);
     expect(shouldAttemptRemoteProfileRepair(account, effectivePlanType)).toBe(true);
 
@@ -302,7 +401,8 @@ describe("accountProfileMaintenance helpers", () => {
       remoteProfile: {
         accountName: "Platform Team",
         accountStructure: "workspace",
-        accountId: "acct_123"
+        accountId: "acct_123",
+        subscriptionActiveUntil: "1900000000"
       },
       planType: effectivePlanType
     });
@@ -312,5 +412,6 @@ describe("accountProfileMaintenance helpers", () => {
     expect(account.accountStructure).toBe("workspace");
     expect(account.accountId).toBe("acct_123");
     expect(account.organizationId).toBe("org_456");
+    expect(account.subscriptionActiveUntil).toBe("1900000000");
   });
 });

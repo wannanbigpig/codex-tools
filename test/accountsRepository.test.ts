@@ -266,4 +266,173 @@ describe("AccountsRepository token persistence", () => {
 
     repo.dispose();
   });
+
+  it("does not replace a valid stored access token with an expired Aideck token", async () => {
+    const secrets = new Map<string, string>();
+    const context = {
+      globalStorageUri: {
+        fsPath: tempDir
+      },
+      secrets: {
+        get: vi.fn(async (key: string) => secrets.get(key)),
+        store: vi.fn(async (key: string, value: string) => {
+          secrets.set(key, value);
+        }),
+        delete: vi.fn(async (key: string) => {
+          secrets.delete(key);
+        })
+      }
+    } as unknown as vscode.ExtensionContext;
+    const storageId = buildAccountStorageId("dev@example.com", "acct_123", undefined);
+    await fs.writeFile(
+      path.join(tempDir, "accounts-index.json"),
+      JSON.stringify({
+        currentAccountId: storageId,
+        accounts: [
+          {
+            id: storageId,
+            email: "dev@example.com",
+            accountName: "Dev",
+            accountId: "acct_123",
+            isActive: true,
+            createdAt: 1,
+            updatedAt: 1
+          }
+        ]
+      }),
+      "utf8"
+    );
+    const storedTokens = createTokens("acct_123");
+    await context.secrets.store(`codex.account.${storageId}`, JSON.stringify(storedTokens));
+
+    const expiredAideckTokens = createTokens("acct_123");
+    expiredAideckTokens.accessToken = createJwt({
+      exp: 1,
+      "https://api.openai.com/auth": {
+        chatgpt_account_id: "acct_123"
+      }
+    });
+    expiredAideckTokens.refreshToken = "expired-aideck-refresh";
+    const aideckAccountFile = path.join(
+      process.env.AIDECK_DATA_DIR as string,
+      "accounts",
+      "codex",
+      "accounts",
+      `${storageId}.json`
+    );
+    await fs.mkdir(path.dirname(aideckAccountFile), { recursive: true });
+    await fs.writeFile(
+      aideckAccountFile,
+      JSON.stringify({
+        id: storageId,
+        email: "dev@example.com",
+        tokens: {
+          id_token: expiredAideckTokens.idToken,
+          access_token: expiredAideckTokens.accessToken,
+          refresh_token: expiredAideckTokens.refreshToken,
+          account_id: expiredAideckTokens.accountId
+        }
+      }),
+      "utf8"
+    );
+
+    const repo = new AccountsRepository(context);
+    const merged = await repo.getTokens(storageId);
+
+    expect(merged?.accessToken).toBe(storedTokens.accessToken);
+    expect(merged?.refreshToken).toBe("refresh-token");
+
+    repo.dispose();
+  });
+
+  it("mirrors refreshed tokens and quota to Aideck account storage", async () => {
+    const secrets = new Map<string, string>();
+    const context = {
+      globalStorageUri: {
+        fsPath: tempDir
+      },
+      secrets: {
+        get: vi.fn(async (key: string) => secrets.get(key)),
+        store: vi.fn(async (key: string, value: string) => {
+          secrets.set(key, value);
+        }),
+        delete: vi.fn(async (key: string) => {
+          secrets.delete(key);
+        })
+      }
+    } as unknown as vscode.ExtensionContext;
+    const storageId = buildAccountStorageId("dev@example.com", "acct_123", undefined);
+    await fs.writeFile(
+      path.join(tempDir, "accounts-index.json"),
+      JSON.stringify({
+        currentAccountId: storageId,
+        accounts: [
+          {
+            id: storageId,
+            email: "dev@example.com",
+            accountName: "Dev",
+            accountId: "acct_123",
+            planType: "plus",
+            isActive: true,
+            createdAt: 1,
+            updatedAt: 1
+          }
+        ]
+      }),
+      "utf8"
+    );
+
+    const repo = new AccountsRepository(context);
+    const updatedTokens = createTokens("acct_123");
+    updatedTokens.refreshToken = "shared-refresh-token";
+
+    await repo.updateQuota(
+      storageId,
+      {
+        hourlyPercentage: 91,
+        hourlyResetTime: 1_800_000_000,
+        hourlyWindowMinutes: 300,
+        hourlyWindowPresent: true,
+        weeklyPercentage: 64,
+        weeklyResetTime: 1_800_100_000,
+        weeklyWindowMinutes: 10080,
+        weeklyWindowPresent: true,
+        codeReviewPercentage: 64,
+        codeReviewWindowPresent: false
+      },
+      undefined,
+      updatedTokens,
+      undefined,
+      "1800000000"
+    );
+
+    const aideckAccountFile = path.join(
+      process.env.AIDECK_DATA_DIR as string,
+      "accounts",
+      "codex",
+      "accounts",
+      `${storageId}.json`
+    );
+    const aideckAccount = JSON.parse(await fs.readFile(aideckAccountFile, "utf8"));
+    expect(aideckAccount.tokens.refresh_token).toBe("shared-refresh-token");
+    expect(aideckAccount.quota.hourly_percentage).toBe(91);
+    expect(aideckAccount.quota.weekly_percentage).toBe(64);
+    expect(aideckAccount.plan_type).toBe("plus");
+    expect(aideckAccount.subscription_active_until).toBe("1800000000");
+
+    const aideckCurrent = JSON.parse(
+      await fs.readFile(path.join(process.env.AIDECK_DATA_DIR as string, "accounts", "codex", "current.json"), "utf8")
+    );
+    expect(aideckCurrent.id).toBe(storageId);
+
+    const aideckIndex = JSON.parse(
+      await fs.readFile(
+        path.join(process.env.AIDECK_DATA_DIR as string, "accounts", "codex", "accounts-index.json"),
+        "utf8"
+      )
+    );
+    expect(aideckIndex.accounts).toContainEqual(expect.objectContaining({ id: storageId, has_quota: true }));
+
+    repo.dispose();
+  });
 });

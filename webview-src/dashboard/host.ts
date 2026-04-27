@@ -42,6 +42,10 @@ export function getActionTimeoutMs(action: DashboardActionName): number {
     case "remove":
     case "toggleStatusBar":
       return 30_000;
+    case "refreshAnnouncements":
+    case "markAnnouncementRead":
+    case "markAllAnnouncementsRead":
+      return 30_000;
     case "refreshAll":
       return 120_000;
     case "restoreFromBackup":

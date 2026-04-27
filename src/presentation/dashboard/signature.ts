@@ -9,6 +9,7 @@ export function buildDashboardStateSignature(state: DashboardState): string {
         account.displayName,
         account.accountName ?? "",
         account.planTypeLabel,
+        account.creditsText ?? "",
         account.accountId ?? "",
         account.organizationId ?? "",
         account.userId ?? "",
@@ -24,23 +25,36 @@ export function buildDashboardStateSignature(state: DashboardState): string {
         account.autoSwitchLockedUntil ?? "",
         account.metrics
           .filter((metric) => metric.visible)
-          .map((metric) => `${metric.key}:${metric.percentage ?? ""}:${metric.resetAt ?? ""}`)
+          .map(
+            (metric) =>
+              `${metric.key}:${metric.percentage ?? ""}:${metric.requestsLeft ?? ""}:${metric.requestsLimit ?? ""}:${metric.resetAt ?? ""}`
+          )
           .join(",")
       ].join(":")
     )
     .join("|");
+  const announcementSignature = [
+    state.announcements.unreadIds.join(","),
+    state.announcements.popupAnnouncement?.id ?? "",
+    state.announcements.announcements
+      .map(
+        (item) =>
+          `${item.id}:${item.title}:${item.summary}:${item.createdAt}:${item.releaseVersion ?? ""}:${item.restartRequired ? "1" : "0"}:${item.restartHint ?? ""}:${item.pinned ? "1" : "0"}`
+      )
+      .join("|")
+  ].join(":");
 
   return [
     state.lang,
     state.panelTitle,
     state.brandSub,
+    state.settings.dashboardTheme,
     state.settings.displayLanguage,
     state.settings.autoRefreshMinutes,
     state.settings.autoSwitchEnabled ? "1" : "0",
     state.settings.autoSwitchHourlyThreshold,
     state.settings.autoSwitchWeeklyThreshold,
     state.settings.autoSwitchLockMinutes,
-    state.settings.showCodeReviewQuota ? "1" : "0",
     state.settings.quotaWarningEnabled ? "1" : "0",
     state.settings.quotaWarningThreshold,
     state.settings.quotaGreenThreshold,
@@ -55,6 +69,7 @@ export function buildDashboardStateSignature(state: DashboardState): string {
     state.indexHealth.lastRestoreSource ?? "",
     state.indexHealth.lastErrorMessage ?? "",
     state.indexHealth.lastRecoveredAt ?? "",
+    announcementSignature,
     accountSignature
   ].join("||");
 }

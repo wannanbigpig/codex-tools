@@ -126,6 +126,38 @@ describe("quota cache invalidation", () => {
     expect(result.quota?.weeklyPercentage).toBe(50);
   });
 
+  it("treats used_percent equal to one as one percent instead of a full ratio", async () => {
+    fetchWithTimeoutMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          rate_limit: {
+            primary_window: {
+              used_percent: 1,
+              reset_after_seconds: 300,
+              limit_window_seconds: 18_000
+            },
+            secondary_window: {
+              used_percent: 0,
+              reset_after_seconds: 600,
+              limit_window_seconds: 604_800
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      )
+    );
+
+    const result = await refreshQuota(account, tokens, true);
+
+    expect(result.quota?.hourlyPercentage).toBe(99);
+    expect(result.quota?.weeklyPercentage).toBe(100);
+  });
+
   it("does not mark a quota window present when used_percent is missing", async () => {
     fetchWithTimeoutMock.mockResolvedValueOnce(
       new Response(
@@ -152,7 +184,7 @@ describe("quota cache invalidation", () => {
     expect(result.quota?.hourlyPercentage).toBe(0);
   });
 
-  it("falls back to code review secondary window when primary has no used_percent", async () => {
+  it("ignores deprecated code review quota fields", async () => {
     fetchWithTimeoutMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -186,11 +218,11 @@ describe("quota cache invalidation", () => {
 
     const result = await refreshQuota(account, tokens, true);
 
-    expect(result.quota?.codeReviewWindowPresent).toBe(true);
-    expect(result.quota?.codeReviewPercentage).toBe(70);
+    expect(result.quota?.codeReviewWindowPresent).toBe(false);
+    expect(result.quota?.codeReviewPercentage).toBe(0);
   });
 
-  it("reads code review quota from nested rate_limit aliases", async () => {
+  it("parses additional model quota from additional_rate_limits", async () => {
     fetchWithTimeoutMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -204,15 +236,26 @@ describe("quota cache invalidation", () => {
               used_percent: 20,
               reset_after_seconds: 900,
               limit_window_seconds: 604_800
-            },
-            code_review_rate_limit: {
-              secondary_window: {
-                remaining_percent: 35,
-                reset_after_seconds: 1200,
-                limit_window_seconds: 86_400
+            }
+          },
+          additional_rate_limits: [
+            {
+              limit_name: "GPT-5.3-Codex-Spark",
+              metered_feature: "codex_bengalfox",
+              rate_limit: {
+                primary_window: {
+                  used_percent: 0,
+                  reset_at: 1_800_000_100,
+                  limit_window_seconds: 18_000
+                },
+                secondary_window: {
+                  used_percent: 10,
+                  reset_at: 1_800_604_800,
+                  limit_window_seconds: 604_800
+                }
               }
             }
-          }
+          ]
         }),
         {
           status: 200,
@@ -224,27 +267,58 @@ describe("quota cache invalidation", () => {
     );
 
     const result = await refreshQuota(account, tokens, true);
+    const additional = result.quota?.additionalRateLimits?.[0];
 
-    expect(result.quota?.codeReviewWindowPresent).toBe(true);
-    expect(result.quota?.codeReviewPercentage).toBe(35);
+    expect(additional?.limitName).toBe("GPT-5.3-Codex-Spark");
+    expect(additional?.meteredFeature).toBe("codex_bengalfox");
+    expect(additional?.hourlyPercentage).toBe(100);
+    expect(additional?.hourlyResetTime).toBe(1_800_000_100);
+    expect(additional?.weeklyPercentage).toBe(90);
+    expect(additional?.weeklyResetTime).toBe(1_800_604_800);
   });
 
-  it("falls back review quota to weekly when no dedicated review window is returned", async () => {
+  it("parses Aideck-compatible quota aliases and request counts", async () => {
     fetchWithTimeoutMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
           rate_limit: {
-            primary_window: {
-              used_percent: 10,
-              reset_after_seconds: 300,
-              limit_window_seconds: 18_000
+            primaryWindow: {
+              usedPercent: 25,
+              resetAfterSeconds: 300,
+              limitWindowSeconds: 18_000,
+              requestsLeft: 75,
+              requestsLimit: 100
             },
-            secondary_window: {
-              used_percent: 40,
-              reset_after_seconds: 900,
-              limit_window_seconds: 604_800
+            secondaryWindow: {
+              remainingPercent: 65,
+              resetAt: 1_800_000_000,
+              limitWindowSeconds: 604_800,
+              remaining: 13,
+              limit: 20
             }
-          }
+          },
+          additionalRateLimits: [
+            {
+              limitName: "GPT-5.3-Codex-Spark",
+              meteredFeature: "codex_bengalfox",
+              rateLimit: {
+                primaryWindow: {
+                  remainingPercent: 45,
+                  resetTime: 1_800_000_300,
+                  limitWindowSeconds: 18_000,
+                  requestsLeft: 9,
+                  requestsLimit: 20
+                }
+              }
+            }
+          ],
+          credits: {
+            has_credits: false,
+            unlimited: false,
+            overage_limit_reached: false,
+            balance: "0"
+          },
+          subscription_active_until: 1_900_000_000
         }),
         {
           status: 200,
@@ -257,8 +331,23 @@ describe("quota cache invalidation", () => {
 
     const result = await refreshQuota(account, tokens, true);
 
-    expect(result.quota?.weeklyPercentage).toBe(60);
-    expect(result.quota?.codeReviewWindowPresent).toBe(true);
-    expect(result.quota?.codeReviewPercentage).toBe(60);
+    expect(result.quota?.hourlyPercentage).toBe(75);
+    expect(result.quota?.hourlyRequestsLeft).toBe(75);
+    expect(result.quota?.hourlyRequestsLimit).toBe(100);
+    expect(result.quota?.weeklyPercentage).toBe(65);
+    expect(result.quota?.weeklyResetTime).toBe(1_800_000_000);
+    expect(result.quota?.weeklyRequestsLeft).toBe(13);
+    expect(result.quota?.weeklyRequestsLimit).toBe(20);
+    expect(result.quota?.additionalRateLimits?.[0]).toMatchObject({
+      limitName: "GPT-5.3-Codex-Spark",
+      meteredFeature: "codex_bengalfox",
+      hourlyPercentage: 45,
+      hourlyResetTime: 1_800_000_300,
+      hourlyRequestsLeft: 9,
+      hourlyRequestsLimit: 20,
+      hourlyWindowPresent: true
+    });
+    expect(result.quota?.credits?.balance).toBe("0");
+    expect(result.updatedSubscriptionActiveUntil).toBe("1900000000");
   });
 });

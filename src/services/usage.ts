@@ -42,7 +42,7 @@ export async function fetchDailyUsageBreakdown(
     status: response.status,
     ok: response.ok,
     url: url.toString(),
-    bodyPreview: raw.slice(0, 1000)
+    bodyPreview: raw
   });
   if (!response.ok) {
     throw new APIError(`Daily usage breakdown API returned ${response.status}: ${raw.slice(0, 200)}`, {

@@ -1,20 +1,21 @@
 import { render } from "preact";
-import { useReducer } from "preact/hooks";
-import type {
-  DashboardAccountViewModel,
-} from "../../src/domain/dashboard/types";
+import { useEffect, useReducer, useState } from "preact/hooks";
+import type { DashboardAccountViewModel } from "../../src/domain/dashboard/types";
+import { AnnouncementCenter } from "./announcementCenter";
 import { BatchSelectionBar, OverviewSection, RecoveryPanel, SavedAccountCard } from "./components";
 import { postMessageToHost } from "./host";
 import { formatSavedAccountsSummary, normalizeThresholds, resolveLockMinutes } from "./helpers";
 import { useDashboardActions, useDashboardHostSync, useDashboardModals } from "./hooks";
-import { EyeIcon, EyeOffIcon, GitHubIcon } from "./icons";
+import { BellIcon, EyeIcon, EyeOffIcon, GitHubIcon } from "./icons";
 import { AddAccountModal, ConfirmCancelOauthModal, SettingsOverlay, ShareTokenModal } from "./panels";
 import { createInitialState, reducer } from "./state";
+import { resolveDashboardThemeFromMedia } from "./theme";
 
 const GITHUB_PROJECT_URL = "https://github.com/wannanbigpig/codex-tools";
 
 function App() {
   const [state, dispatch] = useReducer(reducer, undefined, createInitialState);
+  const [announcementsOpen, setAnnouncementsOpen] = useState(false);
   const { patchSettings, sendAction, sendSetting, isActionPending, hasGlobalPendingAction } = useDashboardActions(
     state,
     dispatch
@@ -29,6 +30,25 @@ function App() {
     handleHostMessage: modals.handleHostMessage,
     handleEscape: () => modals.handleEscape(isActionPending("completeOAuthSession"))
   });
+  useEffect(() => {
+    const preference = snapshot?.settings.dashboardTheme ?? "auto";
+    const root = document.documentElement;
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    const applyResolvedTheme = () => {
+      root.dataset["themePreference"] = preference;
+      root.dataset["theme"] = resolveDashboardThemeFromMedia(preference, media);
+    };
+
+    applyResolvedTheme();
+    media.addEventListener("change", applyResolvedTheme);
+    const observer = new MutationObserver(applyResolvedTheme);
+    observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+
+    return () => {
+      media.removeEventListener("change", applyResolvedTheme);
+      observer.disconnect();
+    };
+  }, [snapshot?.settings.dashboardTheme]);
 
   if (!snapshot) {
     return (
@@ -84,6 +104,7 @@ function App() {
   const isAccountBusy = (accountId: string): boolean =>
     hasGlobalPendingAction || state.pendingActions.some((request) => request.accountId === accountId);
   const privacyToggleLabel = state.privacyMode ? snapshot.copy.showSensitive : snapshot.copy.hideSensitive;
+  const announcementUnreadCount = snapshot.announcements.unreadIds.length;
   const prepareOAuthPending = isActionPending("prepareOAuthSession");
   const startOAuthAutoPending = isActionPending("startOAuthAutoFlow");
   const completeOAuthPending = isActionPending("completeOAuthSession");
@@ -168,6 +189,21 @@ function App() {
               </div>
             </div>
             <div class="hero-settings">
+              <button
+                id="announcementsButton"
+                class={`settings-btn announcement-btn ${announcementUnreadCount > 0 ? "has-unread" : ""}`}
+                type="button"
+                title={snapshot.copy.announcementsTooltip}
+                aria-label={snapshot.copy.announcementsTooltip}
+                onClick={() => setAnnouncementsOpen(true)}
+              >
+                <BellIcon />
+                {announcementUnreadCount > 0 ? (
+                  <span class="announcement-button-badge" aria-label={`${announcementUnreadCount} unread`}>
+                    {announcementUnreadCount > 9 ? "9+" : announcementUnreadCount}
+                  </span>
+                ) : null}
+              </button>
               <button
                 id="githubProjectButton"
                 class="settings-btn action-btn github-project-btn"
@@ -310,6 +346,7 @@ function App() {
       <SettingsOverlay
         open={state.settingsOpen}
         copy={snapshot.copy}
+        lang={snapshot.lang}
         settings={snapshot.settings}
         tokenAutomation={snapshot.tokenAutomation}
         onClose={() => dispatch({ type: "close-settings" })}
@@ -321,6 +358,16 @@ function App() {
         onThresholdCommit={handleThresholdCommit}
         onPickCodexAppPath={() => postMessageToHost({ type: "dashboard:pickCodexAppPath" })}
         onClearCodexAppPath={() => postMessageToHost({ type: "dashboard:clearCodexAppPath" })}
+      />
+
+      <AnnouncementCenter
+        open={announcementsOpen}
+        copy={snapshot.copy}
+        state={snapshot.announcements}
+        refreshPending={isActionPending("refreshAnnouncements")}
+        markAllPending={isActionPending("markAllAnnouncementsRead")}
+        onClose={() => setAnnouncementsOpen(false)}
+        onAction={sendAction}
       />
 
       <AddAccountModal

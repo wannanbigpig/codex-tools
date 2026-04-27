@@ -105,7 +105,6 @@ export function openDetailsPanel(
       if (
         !detailsPanel ||
         (!event.affectsConfiguration("codexAccounts.displayLanguage") &&
-          !event.affectsConfiguration("codexAccounts.showCodeReviewQuota") &&
           !event.affectsConfiguration("codexAccounts.quotaGreenThreshold") &&
           !event.affectsConfiguration("codexAccounts.quotaYellowThreshold"))
       ) {
@@ -242,7 +241,6 @@ function renderHtml(
   }
 ): string {
   const quota = account.quotaSummary;
-  const showCodeReview = vscode.workspace.getConfiguration("codexAccounts").get<boolean>("showCodeReviewQuota", true);
   const accountStatus = account.isActive ? copy.currentlyActive : copy.savedAccount;
   const provider = prettyAuthProvider(account.authProvider);
   const identityName = account.accountName?.trim() ?? account.email;
@@ -279,15 +277,24 @@ function renderHtml(
       </div>`
         ]
       : []),
-    ...(showCodeReview && quota?.codeReviewWindowPresent
-      ? [
-          `<div class="quota-card">
-        <h2>${escapeHtml(copy.reviewQuota)}</h2>
-        <div class="quota-value" style="--metric-color:${colorForPercentage(quota?.codeReviewPercentage)};">${renderQuotaValue(quota?.codeReviewPercentage)}</div>
-        <div class="meta">${escapeHtml(copy.reset)} ${renderLiveReset(quota?.codeReviewResetTime, copy)}</div>
-      </div>`
-        ]
-      : [])
+    ...(quota?.additionalRateLimits ?? []).flatMap((limit) => {
+      const cards: string[] = [];
+      if (limit.hourlyWindowPresent) {
+        cards.push(`<div class="quota-card">
+        <h2>${escapeHtml(`${limit.limitName} ${copy.hourlyQuota}`)}</h2>
+        <div class="quota-value" style="--metric-color:${colorForPercentage(limit.hourlyPercentage)};">${renderQuotaValue(limit.hourlyPercentage)}</div>
+        <div class="meta">${escapeHtml(copy.reset)} ${renderLiveReset(limit.hourlyResetTime, copy)}</div>
+      </div>`);
+      }
+      if (limit.weeklyWindowPresent) {
+        cards.push(`<div class="quota-card">
+        <h2>${escapeHtml(`${limit.limitName} ${copy.weeklyQuota}`)}</h2>
+        <div class="quota-value" style="--metric-color:${colorForPercentage(limit.weeklyPercentage)};">${renderQuotaValue(limit.weeklyPercentage)}</div>
+        <div class="meta">${escapeHtml(copy.reset)} ${renderLiveReset(limit.weeklyResetTime, copy)}</div>
+      </div>`);
+      }
+      return cards;
+    })
   ].join("");
 
   return `<!DOCTYPE html>

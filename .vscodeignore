@@ -3,6 +3,7 @@
 .github/**
 .vscode/**
 .claude/**
+.aitasks/**
 .gitignore
 
 src/**

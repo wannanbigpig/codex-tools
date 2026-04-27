@@ -10,10 +10,13 @@ export function toSharedAccountJson(account: CodexAccountRecord, tokens: CodexTo
     auth_mode: "oauth",
     user_id: account.userId,
     plan_type: account.planType,
+    subscription_active_until: account.subscriptionActiveUntil ?? null,
     account_id: account.accountId ?? null,
     organization_id: account.organizationId ?? null,
     account_name: account.accountName ?? null,
     account_structure: account.accountStructure ?? null,
+    added_via: account.addedVia ?? null,
+    added_at: Math.floor((account.loginAt ?? account.createdAt) / 1000),
     tokens: {
       id_token: tokens.idToken,
       access_token: tokens.accessToken,
@@ -85,16 +88,54 @@ export function fromSharedQuota(quota: NonNullable<SharedCodexAccountJson["quota
   return {
     hourlyPercentage: normalizeQuotaNumber(quota.hourly_percentage),
     hourlyResetTime: normalizeOptionalNumber(quota.hourly_reset_time),
+    hourlyRequestsLeft: normalizeOptionalNumber(quota.hourly_requests_left),
+    hourlyRequestsLimit: normalizeOptionalNumber(quota.hourly_requests_limit),
     hourlyWindowMinutes: normalizeOptionalNumber(quota.hourly_window_minutes),
     hourlyWindowPresent: Boolean(quota.hourly_window_present),
     weeklyPercentage: normalizeQuotaNumber(quota.weekly_percentage),
     weeklyResetTime: normalizeOptionalNumber(quota.weekly_reset_time),
+    weeklyRequestsLeft: normalizeOptionalNumber(quota.weekly_requests_left),
+    weeklyRequestsLimit: normalizeOptionalNumber(quota.weekly_requests_limit),
     weeklyWindowMinutes: normalizeOptionalNumber(quota.weekly_window_minutes),
     weeklyWindowPresent: Boolean(quota.weekly_window_present),
     codeReviewPercentage: normalizeQuotaNumber(quota.code_review_percentage),
     codeReviewResetTime: normalizeOptionalNumber(quota.code_review_reset_time),
+    codeReviewRequestsLeft: normalizeOptionalNumber(quota.code_review_requests_left),
+    codeReviewRequestsLimit: normalizeOptionalNumber(quota.code_review_requests_limit),
     codeReviewWindowMinutes: normalizeOptionalNumber(quota.code_review_window_minutes),
     codeReviewWindowPresent: Boolean(quota.code_review_window_present),
+    additionalRateLimits: Array.isArray(quota.additional_rate_limits)
+      ? quota.additional_rate_limits.map((limit) => ({
+          limitName: sanitizeOptionalValue(limit.limit_name) ?? "额外模型",
+          meteredFeature: sanitizeOptionalValue(limit.metered_feature),
+          hourlyPercentage: normalizeOptionalNumber(limit.hourly_percentage),
+          hourlyResetTime: normalizeOptionalNumber(limit.hourly_reset_time),
+          hourlyRequestsLeft: normalizeOptionalNumber(limit.hourly_requests_left),
+          hourlyRequestsLimit: normalizeOptionalNumber(limit.hourly_requests_limit),
+          hourlyWindowMinutes: normalizeOptionalNumber(limit.hourly_window_minutes),
+          hourlyWindowPresent: Boolean(limit.hourly_window_present),
+          weeklyPercentage: normalizeOptionalNumber(limit.weekly_percentage),
+          weeklyResetTime: normalizeOptionalNumber(limit.weekly_reset_time),
+          weeklyRequestsLeft: normalizeOptionalNumber(limit.weekly_requests_left),
+          weeklyRequestsLimit: normalizeOptionalNumber(limit.weekly_requests_limit),
+          weeklyWindowMinutes: normalizeOptionalNumber(limit.weekly_window_minutes),
+          weeklyWindowPresent: Boolean(limit.weekly_window_present)
+        }))
+      : undefined,
+    credits: quota.credits
+      ? {
+          hasCredits: quota.credits.has_credits === true,
+          unlimited: quota.credits.unlimited === true,
+          overageLimitReached: quota.credits.overage_limit_reached === true,
+          balance: sanitizeOptionalValue(quota.credits.balance) ?? "",
+          approxLocalMessages: Array.isArray(quota.credits.approx_local_messages)
+            ? quota.credits.approx_local_messages
+            : [],
+          approxCloudMessages: Array.isArray(quota.credits.approx_cloud_messages)
+            ? quota.credits.approx_cloud_messages
+            : []
+        }
+      : undefined,
     rawData: quota.raw_data ?? undefined
   };
 }
@@ -143,16 +184,48 @@ function toSharedQuota(summary?: CodexQuotaSummary): SharedCodexAccountJson["quo
   return {
     hourly_percentage: summary.hourlyPercentage,
     hourly_reset_time: summary.hourlyResetTime,
+    hourly_requests_left: summary.hourlyRequestsLeft,
+    hourly_requests_limit: summary.hourlyRequestsLimit,
     hourly_window_minutes: summary.hourlyWindowMinutes,
     hourly_window_present: summary.hourlyWindowPresent,
     weekly_percentage: summary.weeklyPercentage,
     weekly_reset_time: summary.weeklyResetTime,
+    weekly_requests_left: summary.weeklyRequestsLeft,
+    weekly_requests_limit: summary.weeklyRequestsLimit,
     weekly_window_minutes: summary.weeklyWindowMinutes,
     weekly_window_present: summary.weeklyWindowPresent,
     code_review_percentage: summary.codeReviewPercentage,
     code_review_reset_time: summary.codeReviewResetTime,
+    code_review_requests_left: summary.codeReviewRequestsLeft,
+    code_review_requests_limit: summary.codeReviewRequestsLimit,
     code_review_window_minutes: summary.codeReviewWindowMinutes,
     code_review_window_present: summary.codeReviewWindowPresent,
+    additional_rate_limits: summary.additionalRateLimits?.map((limit) => ({
+      limit_name: limit.limitName,
+      metered_feature: limit.meteredFeature,
+      hourly_percentage: limit.hourlyPercentage,
+      hourly_reset_time: limit.hourlyResetTime,
+      hourly_requests_left: limit.hourlyRequestsLeft,
+      hourly_requests_limit: limit.hourlyRequestsLimit,
+      hourly_window_minutes: limit.hourlyWindowMinutes,
+      hourly_window_present: limit.hourlyWindowPresent,
+      weekly_percentage: limit.weeklyPercentage,
+      weekly_reset_time: limit.weeklyResetTime,
+      weekly_requests_left: limit.weeklyRequestsLeft,
+      weekly_requests_limit: limit.weeklyRequestsLimit,
+      weekly_window_minutes: limit.weeklyWindowMinutes,
+      weekly_window_present: limit.weeklyWindowPresent
+    })),
+    credits: summary.credits
+      ? {
+          has_credits: summary.credits.hasCredits,
+          unlimited: summary.credits.unlimited,
+          overage_limit_reached: summary.credits.overageLimitReached,
+          balance: summary.credits.balance,
+          approx_local_messages: summary.credits.approxLocalMessages,
+          approx_cloud_messages: summary.credits.approxCloudMessages
+        }
+      : null,
     raw_data: summary.rawData ?? null
   };
 }

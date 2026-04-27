@@ -1,9 +1,14 @@
 import type { CodexAccountRecord, CodexTokens, DecodedAuthClaims } from "../core/types";
 
 export type RemoteAccountProfileLike = {
+  email?: string;
+  userId?: string;
+  planType?: string;
+  organizationId?: string;
   accountName?: string;
   accountStructure?: string;
   accountId?: string;
+  subscriptionActiveUntil?: string;
 };
 
 export function pickWorkspaceLikeTitle(candidates?: Array<string | undefined>, planType?: string): string | undefined {
@@ -140,6 +145,7 @@ export function buildAccountRecordDraft(params: {
   existing?: CodexAccountRecord;
   existingAccounts: CodexAccountRecord[];
   remoteProfile?: RemoteAccountProfileLike;
+  addedVia?: CodexAccountRecord["addedVia"];
   forceActive: boolean;
   now: number;
 }): CodexAccountRecord {
@@ -163,13 +169,15 @@ export function buildAccountRecordDraft(params: {
     email: params.claims.email,
     userId: params.claims.userId,
     authProvider: params.claims.authProvider,
-    planType: params.claims.planType,
+    planType: params.remoteProfile?.planType ?? params.claims.planType,
+    subscriptionActiveUntil: params.remoteProfile?.subscriptionActiveUntil ?? params.claims.subscriptionActiveUntil ?? params.existing?.subscriptionActiveUntil,
     accountId: remoteAccountIdMatchesClaims
       ? params.remoteProfile?.accountId ?? params.claims.accountId ?? params.tokens.accountId
       : params.claims.accountId ?? params.tokens.accountId,
-    organizationId: params.claims.organizationId,
+    organizationId: params.remoteProfile?.organizationId ?? params.claims.organizationId,
     accountName: resolvedAccountName,
     tags: normalizeAccountTagsForAccount(params.existing),
+    addedVia: params.existing?.addedVia ?? params.addedVia,
     accountStructure: resolveAccountStructure(
       remoteAccountStructure,
       params.existing?.accountStructure,
@@ -190,7 +198,7 @@ export function buildAccountRecordDraft(params: {
 
 export function applyRemoteProfileToAccount(params: {
   account: CodexAccountRecord;
-  claims: Pick<DecodedAuthClaims, "accountId" | "organizationId">;
+  claims: Pick<DecodedAuthClaims, "accountId" | "email" | "organizationId" | "planType" | "subscriptionActiveUntil" | "userId">;
   remoteProfile?: RemoteAccountProfileLike;
   planType?: string;
 }): boolean {
@@ -204,8 +212,15 @@ export function applyRemoteProfileToAccount(params: {
     params.account.accountName = repairedName;
   }
 
+  params.account.email = params.remoteProfile?.email ?? params.claims.email ?? params.account.email;
+  params.account.userId = params.remoteProfile?.userId ?? params.claims.userId ?? params.account.userId;
+  params.account.planType = params.remoteProfile?.planType ?? params.claims.planType ?? params.account.planType;
+  params.account.subscriptionActiveUntil =
+    params.remoteProfile?.subscriptionActiveUntil ??
+    params.claims.subscriptionActiveUntil ??
+    params.account.subscriptionActiveUntil;
   params.account.accountId = params.remoteProfile?.accountId ?? claimsAccountId ?? params.account.accountId;
-  params.account.organizationId = params.claims.organizationId ?? params.account.organizationId;
+  params.account.organizationId = params.remoteProfile?.organizationId ?? params.claims.organizationId ?? params.account.organizationId;
   params.account.accountStructure = resolveAccountStructure(
     params.remoteProfile?.accountStructure,
     params.account.accountStructure,
