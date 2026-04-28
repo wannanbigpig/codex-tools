@@ -123,6 +123,126 @@
       }
     },
     {
+      "id": "ann-2026-04-aideck-session-management",
+      "type": "info",
+      "priority": 450,
+      "title": "需要更完整的会话管理？试试 AiDeck",
+      "summary": "如需更完整的会话管理、CLI 启动与多实例调度能力，可以安装 uTools 插件 AiDeck。",
+      "content": "Codex Accounts Manager 专注于 VS Code 内的多账号、配额查看与快速切换。\n\n如果你需要更完整的 AI 开发工作台能力，可以安装 uTools 插件 AiDeck：\n1. 更完整的会话管理与会话恢复。\n2. 支持 Codex 等 CLI 的启动与调度。\n3. 面向 Antigravity、Codex 等环境的统一调度层与多实例管理。\n\n项目地址：https://github.com/wannanbigpig/aideck",
+      "action": {
+        "type": "url",
+        "target": "https://github.com/wannanbigpig/aideck",
+        "label": "查看 AiDeck 项目"
+      },
+      "targetVersions": "*",
+      "targetLanguages": [
+        "*"
+      ],
+      "showOnce": true,
+      "popup": true,
+      "pinned": true,
+      "createdAt": "2026-04-28T02:00:00Z",
+      "expiresAt": null,
+      "locales": {
+        "en": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "zh": {
+          "title": "需要更完整的会话管理？试试 AiDeck",
+          "summary": "如需更完整的会话管理、CLI 启动与多实例调度能力，可以安装 uTools 插件 AiDeck。",
+          "content": "Codex Accounts Manager 专注于 VS Code 内的多账号、配额查看与快速切换。\n\n如果你需要更完整的 AI 开发工作台能力，可以安装 uTools 插件 AiDeck：\n1. 更完整的会话管理与会话恢复。\n2. 支持 Codex 等 CLI 的启动与调度。\n3. 面向 Antigravity、Codex 等环境的统一调度层与多实例管理。\n\n项目地址：https://github.com/wannanbigpig/aideck",
+          "actionLabel": "查看 AiDeck 项目"
+        },
+        "ja": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "es": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "de": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "fr": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "pt-br": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "ru": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "ko": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "it": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "zh-hant": {
+          "title": "需要更完整的會話管理？試試 AiDeck",
+          "summary": "如需更完整的會話管理、CLI 啟動與多實例調度能力，可以安裝 uTools 外掛 AiDeck。",
+          "content": "Codex Accounts Manager 專注於 VS Code 內的多帳號、配額查看與快速切換。\n\n如果你需要更完整的 AI 開發工作台能力，可以安裝 uTools 外掛 AiDeck：\n1. 更完整的會話管理與會話恢復。\n2. 支援 Codex 等 CLI 的啟動與調度。\n3. 面向 Antigravity、Codex 等環境的統一調度層與多實例管理。\n\n專案地址：https://github.com/wannanbigpig/aideck",
+          "actionLabel": "查看 AiDeck 專案"
+        },
+        "tr": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "pl": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "cs": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "ar": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        },
+        "vi": {
+          "title": "Need fuller session management? Try AiDeck",
+          "summary": "For richer session management, CLI launch, and multi-instance scheduling, install the AiDeck uTools plugin.",
+          "content": "Codex Accounts Manager focuses on multi-account management, quota viewing, and quick switching inside VS Code.\n\nFor a fuller AI development workspace, install the AiDeck uTools plugin:\n1. More complete session management and session recovery.\n2. Launching and scheduling Codex and other CLI tools.\n3. A unified scheduling layer and multi-instance management for environments such as Antigravity and Codex.\n\nProject: https://github.com/wannanbigpig/aideck",
+          "actionLabel": "View AiDeck project"
+        }
+      }
+    },
+    {
       "id": "ann-2026-04-welcome-codex-tools",
       "type": "info",
       "priority": 100,
@@ -144,17 +264,101 @@
       "createdAt": "2026-04-27T00:00:00Z",
       "expiresAt": null,
       "locales": {
-        "en-US": {
+        "en": {
           "title": "Welcome to Codex Accounts Manager",
           "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
           "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
           "actionLabel": "View project"
         },
-        "zh-CN": {
+        "zh": {
           "title": "欢迎使用 Codex Accounts Manager",
           "summary": "多 Codex 账号管理、配额查看与快速切换能力已就绪。",
           "content": "感谢使用 Codex Accounts Manager。\n\n这里会展示项目公告、重要更新和需要你关注的消息。",
           "actionLabel": "查看项目"
+        },
+        "ja": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "es": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "de": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "fr": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "pt-br": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "ru": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "ko": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "it": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "zh-hant": {
+          "title": "歡迎使用 Codex Accounts Manager",
+          "summary": "多 Codex 帳號管理、配額查看與快速切換能力已就緒。",
+          "content": "感謝使用 Codex Accounts Manager。\n\n這裡會展示專案公告、重要更新和需要你關注的訊息。",
+          "actionLabel": "查看專案"
+        },
+        "tr": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "pl": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "cs": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "ar": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
+        },
+        "vi": {
+          "title": "Welcome to Codex Accounts Manager",
+          "summary": "Multi-account management, quota monitoring, and quick switching are ready.",
+          "content": "Thanks for using Codex Accounts Manager.\n\nProject announcements, important updates, and messages that need your attention will appear here.",
+          "actionLabel": "View project"
         }
       }
     }
