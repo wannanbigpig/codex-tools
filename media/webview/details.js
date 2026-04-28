@@ -1,9 +1,43 @@
 (function () {
   const vscode = typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : undefined;
   const lang = document.documentElement.lang;
+  const html = document.documentElement;
+  const media = window.matchMedia("(prefers-color-scheme: light)");
   const privacyButton = document.querySelector("[data-role='privacy-toggle']");
   const editTagsButton = document.querySelector("[data-role='details-edit-tags']");
   const toggleAutoSwitchLockButton = document.querySelector("[data-role='details-toggle-auto-switch-lock']");
+
+  function resolveDashboardTheme() {
+    const themePreference = html.dataset.themePreference || "auto";
+    if (themePreference === "dark" || themePreference === "light") {
+      return themePreference;
+    }
+    if (
+      document.body.classList.contains("vscode-light") ||
+      html.classList.contains("vscode-light")
+    ) {
+      return "light";
+    }
+    if (
+      document.body.classList.contains("vscode-dark") ||
+      document.body.classList.contains("vscode-high-contrast") ||
+      html.classList.contains("vscode-dark") ||
+      html.classList.contains("vscode-high-contrast")
+    ) {
+      return "dark";
+    }
+    return media.matches ? "light" : "dark";
+  }
+
+  function applyResolvedTheme() {
+    html.dataset.theme = resolveDashboardTheme();
+  }
+
+  applyResolvedTheme();
+  media.addEventListener("change", applyResolvedTheme);
+  const themeObserver = new MutationObserver(applyResolvedTheme);
+  themeObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  themeObserver.observe(html, { attributes: true, attributeFilter: ["class"] });
 
   function applyPrivacyMode(hidden) {
     document.body.classList.toggle("privacy-hidden", hidden);

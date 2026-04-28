@@ -91,10 +91,6 @@ export function OverviewSection(props: {
         </div>
       )}
       <div class="overview-main">
-        <div class="overview-head">
-          <div class="overview-head-title">{copy.dashboardTitle}</div>
-          <div class="overview-head-sub">{copy.dashboardSub}</div>
-        </div>
         <div class="overview-metrics">
           {account ? (
             <div class="metrics">

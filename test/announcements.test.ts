@@ -114,6 +114,55 @@ describe("AnnouncementService", () => {
     expect(newer[0]?.restartHint).toBeUndefined();
   });
 
+  it("keeps only the newest releaseVersion announcement when multiple updates exist", () => {
+    const normalized = normalizeAnnouncementResponse({
+      announcements: [
+        {
+          id: "old-update",
+          title: "Old update",
+          summary: "Old summary",
+          content: "Old content",
+          releaseVersion: "0.1.5",
+          targetVersions: "*",
+          targetLanguages: ["*"],
+          popup: true,
+          pinned: false,
+          showOnce: true,
+          createdAt: "2026-01-01T00:00:00Z"
+        },
+        {
+          id: "new-update",
+          title: "New update",
+          summary: "New summary",
+          content: "New content",
+          releaseVersion: "0.1.7",
+          targetVersions: "*",
+          targetLanguages: ["*"],
+          popup: true,
+          pinned: false,
+          showOnce: true,
+          createdAt: "2026-04-01T00:00:00Z"
+        },
+        {
+          id: "stable-note",
+          title: "Stable note",
+          summary: "Stable summary",
+          content: "Stable content",
+          targetVersions: "*",
+          targetLanguages: ["*"],
+          showOnce: true,
+          popup: false,
+          pinned: false,
+          createdAt: "2026-02-01T00:00:00Z"
+        }
+      ]
+    });
+
+    const filtered = filterAnnouncements(normalized.announcements, { version: "0.1.7", locale: "zh" });
+
+    expect(filtered.map((item) => item.id)).toEqual(["new-update", "stable-note"]);
+  });
+
   it("tracks unread, popup, single read, and mark all read state", async () => {
     const storageDir = await makeTempDir();
     const extensionRoot = await makeTempDir();

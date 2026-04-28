@@ -202,7 +202,7 @@ html[data-theme="auto"] body.vscode-light .settings-theme-option.active {
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   min-width: 0;
-  align-self: start;
+  align-self: stretch;
 }
 .overview-account-main {
   display: grid;
@@ -294,24 +294,7 @@ html[data-theme="auto"] body.vscode-light .settings-theme-option.active {
   display: grid;
   gap: 12px;
   min-width: 0;
-}
-.overview-head {
-  padding: 12px 14px;
-  border-radius: 18px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-default);
-  box-shadow: none;
-}
-.overview-head-title {
-  font-size: 15px;
-  font-weight: 900;
-  letter-spacing: -0.01em;
-}
-.overview-head-sub {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
+  height: 100%;
 }
 .overview-actions {
   display: grid;
@@ -471,6 +454,7 @@ html[data-theme="auto"] body.vscode-light .settings-theme-option.active {
   border-radius: 18px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
+  min-height: 100%;
 }
 .overview-empty-copy {
   display: grid;
@@ -1018,11 +1002,9 @@ html[data-theme="auto"] body.vscode-light .overview-shell {
   box-shadow: var(--shadow-sm);
 }
 html[data-theme="light"] .overview-account,
-html[data-theme="light"] .overview-head,
 html[data-theme="light"] .overview-actions,
 html[data-theme="light"] .overview-metrics,
 html[data-theme="auto"] body.vscode-light .overview-account,
-html[data-theme="auto"] body.vscode-light .overview-head,
 html[data-theme="auto"] body.vscode-light .overview-actions,
 html[data-theme="auto"] body.vscode-light .overview-metrics {
   border-color: var(--border-default);
@@ -1030,10 +1012,8 @@ html[data-theme="auto"] body.vscode-light .overview-metrics {
   box-shadow: none;
 }
 html[data-theme="light"] .overview-account-email,
-html[data-theme="light"] .overview-head-title,
 html[data-theme="light"] .overview-empty-title,
 html[data-theme="auto"] body.vscode-light .overview-account-email,
-html[data-theme="auto"] body.vscode-light .overview-head-title,
 html[data-theme="auto"] body.vscode-light .overview-empty-title {
   color: var(--text-primary);
 }

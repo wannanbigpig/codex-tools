@@ -171,12 +171,31 @@ export function filterAnnouncements(
     .filter((item) => !item.expiresAt || parseTime(item.expiresAt) === 0 || parseTime(item.expiresAt) >= now)
     .map((item) => applyLocale(item, locale))
     .map((item) => applyVersionState(item, currentVersion, locale))
+    .filter(onlyLatestReleaseVersion)
     .sort((a, b) => {
       if (a.pinned !== b.pinned) {
         return a.pinned ? -1 : 1;
       }
       return parseTime(b.createdAt) - parseTime(a.createdAt) || b.priority - a.priority;
     });
+}
+
+function onlyLatestReleaseVersion(item: CodexAnnouncement, _index: number, all: CodexAnnouncement[]): boolean {
+  const latestRelease = getLatestReleaseVersion(all);
+  return !item.releaseVersion || item.releaseVersion === latestRelease;
+}
+
+function getLatestReleaseVersion(announcements: CodexAnnouncement[]): string | undefined {
+  let latest: string | undefined;
+  for (const announcement of announcements) {
+    if (!announcement.releaseVersion) {
+      continue;
+    }
+    if (!latest || compareVersions(announcement.releaseVersion, latest) > 0) {
+      latest = announcement.releaseVersion;
+    }
+  }
+  return latest;
 }
 
 export function isDevelopmentRuntime(extensionRoot: string): boolean {
