@@ -6,6 +6,21 @@
 - 历史版本正文统一写在本文件，按版本追加条目，不做删除。
 - 详情可按 `releaseVersion` 反查本次发布公告对应的 `id` 与变更内容。
 
+## 0.1.9（2026-04-28）
+
+### 变更内容
+
+- 打包体积优化：VSIX 不再包含 `node_modules` 中的构建期依赖。
+- 排除 `lightningcss.darwin-arm64.node` 等构建阶段原生二进制，避免安装包被撑到约 4 MB。
+- 0.1.9 VSIX 体积恢复到约 636 KB。
+- `.vscodeignore` 新增 `node_modules/**`，后续打包默认只保留扩展运行需要的文件。
+- 更新公告 `id` 与 `releaseVersion` 同步为 `0.1.9`。
+
+### 说明
+
+- 本版本公告使用新 `id`：`ann-2026-04-codex-tools-0-1-9-package-size-optimization`。
+- 本次不改变运行时功能，主要修复发布包内容与体积。
+
 ## 0.1.8（2026-04-28）
 
 ### 变更内容
