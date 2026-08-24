@@ -11,6 +11,7 @@ import type { CodexAccountRecord } from "../core/types";
 import { fetchWithTimeout } from "../utils/network";
 import { logNetworkEvent } from "../utils/debug";
 import { APIError } from "../core/errors";
+import { isFreePlanType } from "../utils/quotaLabels";
 import {
   SUBSCRIPTION_ACCOUNTS_CHECK_URL,
   SUBSCRIPTION_RETRY_INTERVAL_SECONDS,
@@ -96,23 +97,32 @@ export async function fetchSubscriptionStatus(
 
   const effectiveAccountId = snapshot.accountId ?? accountId;
   if (!effectiveAccountId) {
-    return snapshot;
+    return sanitizeInactiveSubscription(snapshot);
   }
 
+  let subscriptions: SubscriptionStatusSnapshot | undefined;
   try {
-    const subscriptions = await fetchSubscriptions(accessToken, effectiveAccountId);
-    if (subscriptions.planType) {
-      snapshot.planType = subscriptions.planType;
-    }
-    if (subscriptions.subscriptionActiveUntil) {
-      snapshot.subscriptionActiveUntil = subscriptions.subscriptionActiveUntil;
-    }
+    subscriptions = await fetchSubscriptions(accessToken, effectiveAccountId);
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
   } catch (_error) {
-    // subscriptions 失败不抛错，返回 accounts/check 的结果作为兜底
+    // subscriptions 失败不抛错，继续使用 accounts/check 结果。
   }
 
-  return snapshot;
+  const merged = {
+    accountId: subscriptions?.accountId ?? snapshot.accountId ?? effectiveAccountId,
+    planType: subscriptions?.planType ?? snapshot.planType,
+    subscriptionActiveUntil: subscriptions?.subscriptionActiveUntil ?? snapshot.subscriptionActiveUntil
+  };
+  return subscriptionMissingOrExpired(merged.subscriptionActiveUntil)
+    ? sanitizeInactiveSubscription(merged)
+    : merged;
+}
+
+function sanitizeInactiveSubscription(snapshot: SubscriptionStatusSnapshot): SubscriptionStatusSnapshot {
+  return {
+    accountId: snapshot.accountId,
+    planType: isFreePlanType(snapshot.planType) ? snapshot.planType : undefined
+  };
 }
 
 // ── 内部实现 ──

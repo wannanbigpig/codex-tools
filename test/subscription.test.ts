@@ -118,20 +118,8 @@ describe("subscription service", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }));
 
-    const personal = await fetchSubscriptionStatus(
-      "personal-token",
-      "acct_shared",
-      undefined,
-      "Personal",
-      "personal"
-    );
-    const team = await fetchSubscriptionStatus(
-      "team-token",
-      "acct_shared",
-      undefined,
-      "leixiaoan",
-      "workspace"
-    );
+    const personal = await fetchSubscriptionStatus("personal-token", "acct_shared", undefined, "Personal", "personal");
+    const team = await fetchSubscriptionStatus("team-token", "acct_shared", undefined, "leixiaoan", "workspace");
 
     expect(personal).toMatchObject({
       accountId: "acct_personal",
@@ -139,5 +127,29 @@ describe("subscription service", () => {
       subscriptionActiveUntil: "1900000000"
     });
     expect(team).toMatchObject({ planType: "chatgptteamplan", subscriptionActiveUntil: "1950000000" });
+  });
+
+  it("does not return an expired historical paid plan for a Free account", async () => {
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            accounts: {
+              personal: {
+                account: { account_id: "acct_free", structure: "personal" },
+                entitlement: { subscription_plan: "pro", expires_at: "1000000000" }
+              }
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ subscription_plan: "pro", active_until: "1000000000" }), { status: 200 })
+      );
+
+    const snapshot = await fetchSubscriptionStatus("free-token", "acct_free", undefined, "Personal", "personal");
+
+    expect(snapshot).toEqual({ accountId: "acct_free" });
   });
 });

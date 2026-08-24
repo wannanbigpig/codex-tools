@@ -2,6 +2,31 @@
   "version": "1.0",
   "announcements": [
     {
+      "id": "ann-2026-08-codex-tools-0-1-18-chatgpt-free-quota",
+      "type": "fix",
+      "priority": 600,
+      "releaseVersion": "0.1.18",
+      "title": "Codex Accounts Manager 0.1.18 — ChatGPT desktop restart and Free quota fixes",
+      "summary": "Adds compatibility with the merged ChatGPT desktop app and fixes Free plan, subscription, and monthly quota display consistency.",
+      "content": "This release fixes desktop restart behavior and account quota presentation after Codex moved into the ChatGPT desktop app.\n1. ChatGPT desktop integration: detects the merged /Applications/ChatGPT.app, matches its exact main executable, and keeps legacy Codex.app compatibility when switching accounts.\n2. Free plan consistency: expired historical Plus or Pro subscription data can no longer override a current Free quota response, and stale subscription expiry data is cleared when Free is confirmed.\n3. Monthly quota labels: Free and 28-day-or-longer quota windows are shown as Monthly, while paid 7-day windows remain Weekly across the Dashboard, status bar, details, account switcher, and warnings.\n4. Dependency security: upgrades production Undici to 6.28.0 and passes the production dependency audit.\n5. Regression coverage: adds tests for ChatGPT process detection, expired subscription handling, Free profile maintenance, monthly labels, and time-stable quota reset behavior.",
+      "targetVersions": "*",
+      "targetLanguages": [
+        "*"
+      ],
+      "showOnce": true,
+      "popup": true,
+      "pinned": true,
+      "createdAt": "2026-08-24T00:00:00Z",
+      "expiresAt": null,
+      "locales": {
+        "zh": {
+          "title": "Codex Accounts Manager 0.1.18 — ChatGPT 桌面重启与 Free 配额修复",
+          "summary": "兼容合并后的 ChatGPT 桌面应用，并修复 Free 套餐、订阅信息和每月配额展示不一致。",
+          "content": "本次更新修复 Codex 合并到 ChatGPT 桌面应用后的自动重启，以及账号套餐和配额展示问题。\n1. ChatGPT 桌面联动：识别合并后的 /Applications/ChatGPT.app，按真实主进程精确匹配，并继续兼容旧版 Codex.app。\n2. Free 套餐一致性：过期历史 Plus 或 Pro 订阅不再覆盖当前 Free 配额，确认 Free 后会清理旧订阅到期信息。\n3. 每月配额标签：Free 或 28 天以上窗口在 Dashboard、状态栏、详情、切号选择和预警中显示为“每月”，付费 7 天窗口继续显示为“每周”。\n4. 依赖安全：生产依赖 Undici 升级到 6.28.0，并通过生产依赖安全审计。\n5. 回归测试补强：新增 ChatGPT 进程检测、过期订阅、Free 档案维护、每月标签和稳定时间测试。"
+        }
+      }
+    },
+    {
       "id": "ann-2026-07-codex-tools-0-1-17-proxy-statusbar",
       "type": "feature",
       "priority": 590,

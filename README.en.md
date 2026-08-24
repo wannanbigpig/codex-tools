@@ -4,7 +4,7 @@ English · [简体中文](README.md)
 
 VS Code extension for managing multiple Codex accounts, viewing quota usage, and switching the active global `auth.json`.
 
-![Version](https://img.shields.io/badge/version-0.1.17-blue)
+![Version](https://img.shields.io/badge/version-0.1.18-blue)
 ![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.96.0-007acc)
 ![License](https://img.shields.io/github/license/wannanbigpig/codex-tools)
 ![Stars](https://img.shields.io/github/stars/wannanbigpig/codex-tools?style=flat)
@@ -14,7 +14,7 @@ VS Code extension for managing multiple Codex accounts, viewing quota usage, and
 
 Manage multiple Codex accounts inside VS Code, inspect quota usage, switch the active global account, and monitor key quota data from the status bar.
 
-**Features:** quota dashboard, multi-account management, OAuth sign-in, first-run local account detection and binding, immediate quota refresh after import, cross-window account sync, Codex App auto-restart, status bar monitoring, details panel, multilingual UI, and extension-level language override.
+**Features:** quota dashboard, multi-account management, OAuth sign-in, first-run local account detection and binding, immediate quota refresh after import, cross-window account sync, ChatGPT/Codex desktop auto-restart, status bar monitoring, details panel, multilingual UI, and extension-level language override.
 
 **Language:** follows the current VS Code display language. Primary support is for Simplified Chinese and English, with additional localization for other languages.
 
@@ -60,10 +60,10 @@ The extension provides a Webview dashboard for managing and monitoring all saved
 - Automatically sync the active account when another VS Code window switches accounts
 - Prompt the current window to reload when an external account switch is detected
 
-### Codex App Integration
+### ChatGPT / Codex Desktop Integration
 
-- Detect whether Codex App is installed when switching accounts
-- Automatically restart Codex App if it is already running
+- Detect the merged `ChatGPT.app` or legacy `Codex.app` when switching accounts
+- Automatically restart the matching desktop app if it is already running
 - Skip restart if the desktop app is installed but not currently running
 - Currently supports common macOS, Windows, and Linux install/process patterns
 
@@ -108,10 +108,10 @@ You can change these directly from the settings button in the top-right corner o
 - `Language`
   - `Auto (follow VS Code)`, `Simplified Chinese`, `English`, and other supported languages
   - Only affects Codex Accounts Manager dashboard copy and prompt text
-- `Codex App Restart Policy`
+- `ChatGPT / Codex Desktop Restart Policy`
   - Disabled by default
   - When enabled, choose:
-  - `Restart automatically`: restart Codex App on account switch if it is already running
+  - `Restart automatically`: restart the matching desktop app on account switch if it is already running
   - `Ask every time`: let you confirm each restart manually
 - `Automatic Quota Refresh`
   - Can be disabled, or set to `5 / 10 / 15 / 30 / 60` minutes
@@ -219,7 +219,8 @@ npx @vscode/vsce package
 - Switching accounts updates the machine-wide active Codex `auth.json`
 - Quota is refreshed immediately after local account bind/import
 - External account changes from another window are detected automatically
-- Codex App restart only happens when the desktop app is already running
+- ChatGPT/Codex desktop restart only happens when the app is already running
+- Free accounts label the 30-day quota window as `Monthly`; paid 7-day windows remain `Weekly`
 - Quota visibility depends on the data returned by the current Codex session
 
 ---

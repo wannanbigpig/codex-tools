@@ -148,9 +148,7 @@ describe("sharedAccounts helpers", () => {
     });
 
     expect(toSharedEntries(sessionEntry)).toEqual([sessionEntry]);
-    expect(() => previewSharedEntry(sessionEntry)).toThrowError(
-      /Shared account JSON does not include valid tokens/
-    );
+    expect(() => previewSharedEntry(sessionEntry)).toThrowError(/Shared account JSON does not include valid tokens/);
   });
 
   it("maps shared quota payloads into internal summaries", () => {
@@ -497,6 +495,33 @@ describe("accountProfileMaintenance helpers", () => {
     expect(account.accountId).toBe("acct_123");
     expect(account.organizationId).toBe("org_456");
     expect(account.subscriptionActiveUntil).toBe("1900000000");
+  });
+
+  it("clears an expired paid subscription when current quota reports Free", () => {
+    const account: CodexAccountRecord = {
+      id: "free-account",
+      email: "free@example.com",
+      isActive: false,
+      planType: "pro",
+      subscriptionActiveUntil: "1000000000",
+      createdAt: 1,
+      updatedAt: 1
+    };
+
+    applyQuotaUpdate({
+      account,
+      quotaSummary: {
+        hourlyPercentage: 0,
+        weeklyPercentage: 100,
+        weeklyWindowMinutes: 43_200,
+        weeklyWindowPresent: true
+      },
+      updatedPlanType: "free",
+      now: 88
+    });
+
+    expect(account.planType).toBe("free");
+    expect(account.subscriptionActiveUntil).toBeUndefined();
   });
 
   it("preserves reset credits expiry when quota refresh only returns available count", () => {

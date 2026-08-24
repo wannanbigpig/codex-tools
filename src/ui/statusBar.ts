@@ -5,7 +5,7 @@ import { formatPlanType } from "../application/dashboard/copy";
 import { isHourlyQuotaControlEnabled } from "../infrastructure/config/extensionSettings";
 import { getCurrentWindowRuntimeAccountId } from "../presentation/workbench/windowRuntimeAccount";
 import { formatRelativeReset } from "../utils/time";
-import { escapeMarkdown, getLanguage, quotaMarkerForPercentage, t } from "../utils";
+import { escapeMarkdown, getLanguage, quotaMarkerForPercentage, resolveLongQuotaLabel, t } from "../utils";
 
 const STATUS_BAR_ICON = "$(dashboard)";
 
@@ -105,8 +105,9 @@ export function renderAccountPanel(
   showHourlyQuota: boolean
 ): string {
   const _t = t();
+  const language = getLanguage();
   const title = `${account.accountName ?? account.email} · ${account.email}`;
-  const plan = formatPlanType(account.planType ?? "team", getLanguage());
+  const plan = formatPlanType(account.planType ?? "team", language);
   const markers = [
     current ? _t("account.current") : undefined,
     primary ? _t("account.primary") : undefined,
@@ -128,7 +129,12 @@ export function renderAccountPanel(
     ...(account.quotaSummary?.weeklyWindowPresent
       ? [
           renderMetricRow(
-            _t("quota.weekly"),
+            resolveLongQuotaLabel(
+              account.planType,
+              account.quotaSummary?.weeklyWindowMinutes,
+              language,
+              _t("quota.weekly")
+            ),
             account.quotaSummary?.weeklyPercentage,
             account.quotaSummary?.weeklyResetTime
           )
@@ -144,7 +150,11 @@ export function renderAccountPanel(
     }
     if (limit.weeklyWindowPresent) {
       lines.push(
-        renderMetricRow(`${limit.limitName} ${_t("quota.weekly")}`, limit.weeklyPercentage, limit.weeklyResetTime)
+        renderMetricRow(
+          `${limit.limitName} ${resolveLongQuotaLabel(undefined, limit.weeklyWindowMinutes, language, _t("quota.weekly"))}`,
+          limit.weeklyPercentage,
+          limit.weeklyResetTime
+        )
       );
     }
   }

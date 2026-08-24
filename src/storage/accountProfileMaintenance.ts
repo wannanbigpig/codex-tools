@@ -1,6 +1,7 @@
 import type { CodexAccountRecord, CodexQuotaSummary, CodexTokens } from "../core/types";
 import { extractClaims } from "../utils/jwt";
 import { normalizeQuotaSummary } from "../utils/quotaWindows";
+import { isFreePlanType } from "../utils/quotaLabels";
 import {
   applyRemoteProfileToAccount,
   type RemoteAccountProfileLike,
@@ -48,8 +49,11 @@ export function applyQuotaUpdate(params: {
 
   if (params.updatedPlanType) {
     params.account.planType = params.updatedPlanType;
+    if (isFreePlanType(params.updatedPlanType)) {
+      params.account.subscriptionActiveUntil = undefined;
+    }
   }
-  if (params.updatedSubscriptionActiveUntil) {
+  if (params.updatedSubscriptionActiveUntil && !isFreePlanType(params.updatedPlanType)) {
     params.account.subscriptionActiveUntil = params.updatedSubscriptionActiveUntil;
   }
 

@@ -15,7 +15,7 @@ import {
   recordAutoSwitchReason
 } from "../../presentation/workbench/autoSwitchState";
 import { clearTokenAutomationError } from "../../presentation/workbench/tokenAutomationState";
-import { getCommandCopy, getLanguage, getQuotaWarningCopy } from "../../utils";
+import { getCommandCopy, getLanguage, getQuotaWarningCopy, resolveLongQuotaLabel } from "../../utils";
 import { getDashboardCopy } from "../dashboard/copy";
 import { autoReloadWindowForAccount, handleCodexAppRestartPreference } from "./switchEffects";
 
@@ -316,7 +316,16 @@ export async function maybeWarnForAccount(repo: AccountsRepository, accountId: s
     clearQuotaWarningCount(account.id, "hourly");
   }
   if (hasComparableWeeklyWindow(account)) {
-    checks.push({ dimension: "weekly", label: copy.weeklyLabel, value: account.quotaSummary.weeklyPercentage });
+    checks.push({
+      dimension: "weekly",
+      label: resolveLongQuotaLabel(
+        account.planType,
+        account.quotaSummary.weeklyWindowMinutes,
+        getLanguage(),
+        copy.weeklyLabel
+      ),
+      value: account.quotaSummary.weeklyPercentage
+    });
   } else {
     clearQuotaWarningCount(account.id, "weekly");
   }

@@ -64,6 +64,24 @@ describe("renderAccountPanel", () => {
     expect(panel).toContain("82%");
     expect(panel).toContain("71%");
   });
+
+  it("labels a Free 30-day quota as monthly", () => {
+    const panel = renderAccountPanel(
+      {
+        ...account,
+        planType: "free",
+        quotaSummary: {
+          ...account.quotaSummary,
+          weeklyWindowMinutes: 43_200
+        }
+      },
+      true,
+      true,
+      false
+    );
+
+    expect(panel).toContain("Monthly");
+  });
 });
 
 describe("buildThinBar", () => {

@@ -4,7 +4,7 @@
 
 VS Code 扩展，用于管理多个 Codex 账号、查看配额总览，并快速切换当前生效的全局 `auth.json`。
 
-![Version](https://img.shields.io/badge/version-0.1.17-blue)
+![Version](https://img.shields.io/badge/version-0.1.18-blue)
 ![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.96.0-007acc)
 ![License](https://img.shields.io/github/license/wannanbigpig/codex-tools)
 ![Stars](https://img.shields.io/github/stars/wannanbigpig/codex-tools?style=flat)
@@ -14,7 +14,7 @@ VS Code 扩展，用于管理多个 Codex 账号、查看配额总览，并快�
 
 用于在 VS Code 中统一管理 Codex 多账号、查看配额、切换当前账号，并通过状态栏快速监控使用情况。
 
-**功能：** 配额总览面板、多账号管理、OAuth 添加账号、首次本地账号自动检测与绑定、导入当前 `auth.json` 后立即刷新、跨窗口账号同步、共享 JSON 恢复/导出、Codex App 联动与可选重启、自动切号、后台 token 自动刷新、详情面板、多语言界面及本扩展语言覆盖设置。
+**功能：** 配额总览面板、多账号管理、OAuth 添加账号、首次本地账号自动检测与绑定、导入当前 `auth.json` 后立即刷新、跨窗口账号同步、共享 JSON 恢复/导出、ChatGPT/Codex 桌面应用联动与可选重启、自动切号、后台 token 自动刷新、详情面板、多语言界面及本扩展语言覆盖设置。
 
 **语言：** 默认跟随 VS Code 语言设置，当前主要支持简体中文、English，并提供其他语言的本地化支持。
 
@@ -64,12 +64,12 @@ VS Code 扩展，用于管理多个 Codex 账号、查看配额总览，并快�
 - 其他 VS Code 窗口切换账号后，当前窗口会自动同步激活账号状态
 - 检测到外部账号切换时，会提示是否重载当前窗口以同步内置 Codex 会话
 
-### Codex App 联动
+### ChatGPT / Codex 桌面应用联动
 
-- 切换账号后可检测本机是否安装 Codex App
+- 切换账号后可检测新版 `ChatGPT.app` 或旧版 `Codex.app`
 - 默认在 App 运行时尝试重启并应用新账号状态；未运行则跳过，不会强行拉起
 - 支持“自动重启”与“手动确认重启”两种策略
-- 允许配置自定义 Codex App 路径
+- 允许配置自定义桌面应用路径
 - 当前已兼容 macOS、Windows、Linux 的常见安装路径与进程检测
 
 ### 与 AiDeck 搭配使用
@@ -144,10 +144,10 @@ AiDeck 提供面向 Antigravity、Codex 等环境的统一调度层，适合需�
 - `语言`
   - `自动（跟随 VS Code）`，或手动指定简体中文、English 及其他受支持语言
   - 仅影响本扩展的总览面板和提示文案
-- `Codex App 重启策略`
+- `ChatGPT / Codex 桌面应用重启策略`
   - 可开启或关闭该联动
   - 开启后可选择：
-  - `自动重启`：切换账号时如果 Codex App 正在运行则直接重启
+  - `自动重启`：切换账号时如果对应桌面应用正在运行则直接重启
   - `手动确认重启`：切换后每次手动确认是否立即重启
 - `配额自动刷新`
 - 可关闭，或设置为 `1 ~ 60` 整数分钟
@@ -278,7 +278,8 @@ npx @vscode/vsce package
 - 切换账号会更新当前机器全局生效的 Codex `auth.json`
 - 导入当前账号或首次绑定本地账号后，会立即刷新最新配额
 - 如果其他窗口切换了账号，当前窗口会自动检测并提示同步
-- 如果 Codex App 正在运行，切换账号后会尝试自动重启；未运行则跳过
+- 如果 ChatGPT/Codex 桌面应用正在运行，切换账号后会尝试自动重启；未运行则跳过
+- Free 账户的 30 天配额窗口显示为“每月”；付费账户的 7 天窗口显示为“每周”
 - 配额显示依赖当前账号会话返回的数据
 
 ---

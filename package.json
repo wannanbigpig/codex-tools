@@ -2,7 +2,7 @@
   "name": "codex-accounts-manager",
   "displayName": "Codex Accounts Manager",
   "description": "Manage multiple Codex accounts in VS Code, inspect quota, and switch the active global auth.json.",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "publisher": "wannanbigpig",
   "icon": "media/CT_logo_transparent_square_hd.png",
   "license": "MIT",
@@ -31,12 +31,12 @@
             "manual"
           ],
           "default": "manual",
-          "markdownDescription": "How to handle Codex App restart when switching accounts and the desktop app is already running. `auto` restarts it automatically, `manual` asks you to click restart each time."
+          "markdownDescription": "How to handle the Codex desktop experience restart when switching accounts. Supports both the merged ChatGPT app and legacy Codex app. `auto` restarts it automatically, `manual` asks you to click restart each time."
         },
         "codexAccounts.codexAppRestartEnabled": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Whether Codex Accounts Manager should manage Codex App when switching accounts. Turn this off to skip restart prompts and app handling entirely."
+          "markdownDescription": "Whether Codex Accounts Manager should manage the ChatGPT/Codex desktop app when switching accounts. Turn this off to skip restart prompts and app handling entirely."
         },
         "codexAccounts.dashboardTheme": {
           "type": "string",
@@ -236,7 +236,7 @@
     "format:check": "prettier --check \"src/**/*.ts\" \"webview-src/**/*.{ts,tsx}\""
   },
   "dependencies": {
-    "undici": "6.27.0"
+    "undici": "6.28.0"
   },
   "devDependencies": {
     "@types/node": "^20.16.11",

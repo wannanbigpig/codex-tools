@@ -9,6 +9,7 @@ import { getQuotaIssueKind } from "../../utils/quotaIssue";
 import { getTokenAutomationSnapshot } from "../../presentation/workbench/tokenAutomationState";
 import { getAutoSwitchRuntimeSnapshot } from "../../presentation/workbench/autoSwitchState";
 import { getAccountAutomationState, isHealthDismissed, resolveAccountHealth } from "../accounts/health";
+import { isFreePlanType, resolveLongQuotaLabel } from "../../utils/quotaLabels";
 
 export async function buildDashboardState(
   repo: AccountsRepository,
@@ -175,16 +176,17 @@ function mapAccount(
     resetCreditsAvailable,
     resetCreditsNextExpiresAt,
     autoSwitchLockedUntil: autoSwitchRuntime?.lockedAccountId === account.id ? autoSwitchRuntime.lockedUntil : undefined,
-    metrics: buildMetrics(account, copy)
+    metrics: buildMetrics(account, copy, lang)
   };
 }
 
-function buildMetrics(
+export function buildMetrics(
   account: CodexAccountRecord,
-  copy: DashboardState["copy"]
+  copy: DashboardState["copy"],
+  lang: DashboardState["lang"]
 ): DashboardMetricViewModel[] {
   const quota = account.quotaSummary;
-  const isFree = account.planType?.trim().toLowerCase() === "free";
+  const isFree = isFreePlanType(account.planType);
   const metrics: DashboardMetricViewModel[] = [];
 
   if (!isFree) {
@@ -201,7 +203,7 @@ function buildMetrics(
 
   metrics.push({
     key: "weekly",
-    label: copy.weeklyLabel,
+    label: resolveLongQuotaLabel(account.planType, quota?.weeklyWindowMinutes, lang, copy.weeklyLabel),
     percentage: quota?.weeklyPercentage,
     resetAt: quota?.weeklyResetTime,
     requestsLeft: quota?.weeklyRequestsLeft,
@@ -224,7 +226,7 @@ function buildMetrics(
     if (limit.weeklyWindowPresent) {
       metrics.push({
         key: `additional-${index}-weekly`,
-        label: `${limit.limitName} ${copy.weeklyLabel}`,
+        label: `${limit.limitName} ${resolveLongQuotaLabel(undefined, limit.weeklyWindowMinutes, lang, copy.weeklyLabel)}`,
         percentage: limit.weeklyPercentage,
         resetAt: limit.weeklyResetTime,
         requestsLeft: limit.weeklyRequestsLeft,

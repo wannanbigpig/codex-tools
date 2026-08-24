@@ -8,13 +8,6 @@ import * as vscode from "vscode";
 
 const execFileAsync = promisify(execFile);
 
-const MAC_APP_CANDIDATES = [
-  "/Applications/Codex.app",
-  "/Applications/OpenAI Codex.app",
-  path.join(os.homedir(), "Applications", "Codex.app"),
-  path.join(os.homedir(), "Applications", "OpenAI Codex.app")
-];
-
 const LOCAL_APP_DATA = process.env["LOCALAPPDATA"] ?? "";
 const PROGRAM_FILES = process.env["ProgramFiles"] ?? "";
 const PROGRAM_FILES_X86 = process.env["ProgramFiles(x86)"] ?? "";
@@ -55,7 +48,7 @@ export async function restartCodexAppIfInstalled(): Promise<boolean> {
     return false;
   }
 
-  await forceStopCodexProcesses();
+  await forceStopCodexProcesses(state.launcherPath);
   await delay(800);
   await launchCodexApp(state.launcherPath);
   return true;
@@ -71,7 +64,7 @@ export async function getCodexAppState(): Promise<{
     return { installed: false, running: false };
   }
 
-  const running = await isCodexAppRunning();
+  const running = await isCodexAppRunning(launcherPath);
   return { installed: true, running, launcherPath };
 }
 
@@ -101,7 +94,7 @@ export async function resolveCodexAppLaunchPath(customPathInput?: string): Promi
     }
   }
 
-  const candidates = getAppCandidates();
+  const candidates = getCodexAppCandidates();
   for (const candidate of candidates) {
     try {
       await fs.access(candidate);
@@ -113,10 +106,20 @@ export async function resolveCodexAppLaunchPath(customPathInput?: string): Promi
   return remember(undefined);
 }
 
-function getAppCandidates(): string[] {
-  switch (process.platform) {
+export function getCodexAppCandidates(
+  platform: NodeJS.Platform = process.platform,
+  homeDirectory = os.homedir()
+): string[] {
+  switch (platform) {
     case "darwin":
-      return MAC_APP_CANDIDATES;
+      return [
+        "/Applications/ChatGPT.app",
+        path.join(homeDirectory, "Applications", "ChatGPT.app"),
+        "/Applications/Codex.app",
+        "/Applications/OpenAI Codex.app",
+        path.join(homeDirectory, "Applications", "Codex.app"),
+        path.join(homeDirectory, "Applications", "OpenAI Codex.app")
+      ];
     case "win32":
       return WINDOWS_APP_CANDIDATES;
     case "linux":
@@ -129,7 +132,7 @@ function getAppCandidates(): string[] {
 async function launchCodexApp(appPath: string): Promise<void> {
   switch (process.platform) {
     case "darwin":
-      await execFileAsync("open", ["-a", appPath]);
+      await execFileAsync("open", [appPath]);
       return;
     case "win32":
       await execFileAsync("cmd", ["/c", "start", "", appPath]);
@@ -142,7 +145,16 @@ async function launchCodexApp(appPath: string): Promise<void> {
   }
 }
 
-async function forceStopCodexProcesses(): Promise<void> {
+async function forceStopCodexProcesses(launcherPath: string): Promise<void> {
+  if (process.platform === "darwin") {
+    const executablePath = await resolveMacAppExecutablePath(launcherPath);
+    const processIds = await listMacAppProcessIds(executablePath);
+    if (processIds.length > 0) {
+      await execFileAsync("kill", ["-TERM", ...processIds.map(String)]);
+    }
+    return;
+  }
+
   for (const processName of getProcessCandidates()) {
     try {
       await killProcess(processName);
@@ -166,7 +178,12 @@ async function killProcess(processName: string): Promise<void> {
   }
 }
 
-async function isCodexAppRunning(): Promise<boolean> {
+async function isCodexAppRunning(launcherPath: string): Promise<boolean> {
+  if (process.platform === "darwin") {
+    const executablePath = await resolveMacAppExecutablePath(launcherPath);
+    return (await listMacAppProcessIds(executablePath)).length > 0;
+  }
+
   for (const processName of getProcessCandidates()) {
     try {
       await probeProcess(processName);
@@ -176,6 +193,42 @@ async function isCodexAppRunning(): Promise<boolean> {
     }
   }
   return false;
+}
+
+async function resolveMacAppExecutablePath(appPath: string): Promise<string> {
+  const infoPlistPath = path.join(appPath, "Contents", "Info.plist");
+  try {
+    const { stdout } = await execFileAsync("/usr/libexec/PlistBuddy", [
+      "-c",
+      "Print :CFBundleExecutable",
+      infoPlistPath
+    ]);
+    const executableName = stdout.trim();
+    if (executableName) {
+      return path.join(appPath, "Contents", "MacOS", executableName);
+    }
+  } catch {
+    // Fall back to the bundle name for custom or non-standard app bundles.
+  }
+  return path.join(appPath, "Contents", "MacOS", path.basename(appPath, ".app"));
+}
+
+async function listMacAppProcessIds(executablePath: string): Promise<number[]> {
+  const { stdout } = await execFileAsync("ps", ["-axo", "pid=,command="]);
+  return findMacAppProcessIds(stdout, executablePath);
+}
+
+export function findMacAppProcessIds(processList: string, executablePath: string): number[] {
+  const escapedExecutablePath = executablePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matcher = new RegExp(`^\\s*(\\d+)\\s+${escapedExecutablePath}(?:\\s|$)`);
+  return processList.split(/\r?\n/).flatMap((line) => {
+    const match = matcher.exec(line);
+    if (!match?.[1]) {
+      return [];
+    }
+    const processId = Number(match[1]);
+    return Number.isInteger(processId) && processId > 0 ? [processId] : [];
+  });
 }
 
 function getProcessCandidates(): string[] {

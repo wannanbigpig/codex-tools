@@ -4,6 +4,7 @@ import { fetchResetCredits } from "../src/services/quota";
 describe("fetchResetCredits", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("prefers explicit next_expires_at from the reset credits payload", async () => {
@@ -60,6 +61,8 @@ describe("fetchResetCredits", () => {
   });
 
   it("derives next expiry from ISO expires_at values in available credits", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-01T00:00:00Z"));
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
