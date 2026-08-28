@@ -55,6 +55,9 @@ export function buildDashboardStateSignature(state: DashboardState): string {
       )
       .join("|")
   ].join(":");
+  const dailyUsageSignature = (state.dailyUsageCache ?? [])
+    .map((entry) => `${entry.accountId}:${entry.fetchedAt}:${entry.usage.days}:${entry.usage.points.map((point) => `${point.date}:${point.totalTokens}`).join(",")}`)
+    .join("|");
 
   return [
     state.lang,
@@ -96,6 +99,7 @@ export function buildDashboardStateSignature(state: DashboardState): string {
     state.terminalNotice?.message ?? "",
     state.terminalNotice?.createdAt ?? "",
     announcementSignature,
+    dailyUsageSignature,
     accountSignature
   ].join("||");
 }

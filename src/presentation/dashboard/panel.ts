@@ -17,7 +17,7 @@ import { clearDashboardCodexAppPath, dispatchDashboardClientMessage } from "./me
 import { DashboardOAuthCoordinator } from "./oauthCoordinator";
 import { backfillMissingResetCreditExpiries } from "./resetCreditsBackfill";
 import { withDashboardNotificationSuppression } from "../../utils/notificationPolicy";
-import { saveDashboardUsageHistory } from "../../services/dashboardUsageHistory";
+import { readDashboardDailyUsageCache, saveDashboardUsageHistory } from "../../services/dashboardUsageHistory";
 import { handleDashboardSettingUpdate, pickDashboardCodexAppPath } from "./settings";
 
 const DASHBOARD_VIEW_TYPE = "codexQuotaSummary";
@@ -26,6 +26,7 @@ const REOPEN_AFTER_HOST_RESTART_KEY = "codexAccounts.reopenDashboardAfterHostRes
 let dashboardPanelController: DashboardPanelController | undefined;
 
 type PublishDashboardSnapshotParams = {
+  context: vscode.ExtensionContext;
   repo: AccountsRepository;
   settingsStore: ExtensionSettingsStore;
   logoUri: string;
@@ -38,7 +39,8 @@ type PublishDashboardSnapshotParams = {
 };
 
 export async function publishDashboardSnapshot(params: PublishDashboardSnapshotParams): Promise<string | undefined> {
-  const state = await buildDashboardState(params.repo, params.settingsStore, params.logoUri, params.announcementsState);
+  const baseState = await buildDashboardState(params.repo, params.settingsStore, params.logoUri, params.announcementsState);
+  const state = { ...baseState, dailyUsageCache: readDashboardDailyUsageCache(params.context) };
   void backfillMissingResetCreditExpiries(params.repo, state.accounts, params.schedulePublishState).catch(
     () => undefined
   );
@@ -204,6 +206,7 @@ class DashboardPanelController {
       .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "product-icons", "codex-openai.svg"))
       .toString();
     const signature = await publishDashboardSnapshot({
+      context: this.context,
       repo: this.repo,
       settingsStore: this.settingsStore,
       logoUri,

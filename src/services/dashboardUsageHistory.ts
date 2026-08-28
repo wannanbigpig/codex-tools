@@ -1,11 +1,69 @@
 import type * as vscode from "vscode";
-import type { DashboardState, DashboardUsageSample } from "../domain/dashboard/types";
+import type {
+  DashboardDailyUsageCacheEntry,
+  DashboardState,
+  DashboardUsageSample
+} from "../domain/dashboard/types";
+import type { CodexDailyUsageBreakdown } from "../core/types";
 
 const STORAGE_KEY = "codexAccounts.dashboardUsageHistory.v1";
 const MAX_SAMPLES = 10_000;
+const DAILY_USAGE_CACHE_KEY = "codexAccounts.dashboardDailyUsageCache.v1";
+const MAX_DAILY_USAGE_CACHE_ENTRIES = 64;
 
 export function readDashboardUsageHistory(context: vscode.ExtensionContext): DashboardUsageSample[] {
   return normalizeDashboardUsageHistory(context.globalState.get<unknown>(STORAGE_KEY));
+}
+
+export function readDashboardDailyUsageCache(context: vscode.ExtensionContext): DashboardDailyUsageCacheEntry[] {
+  return normalizeDashboardDailyUsageCache(context.globalState.get<unknown>(DAILY_USAGE_CACHE_KEY));
+}
+
+export async function saveDashboardDailyUsageCache(
+  context: vscode.ExtensionContext,
+  entries: readonly DashboardDailyUsageCacheEntry[]
+): Promise<void> {
+  await context.globalState.update(DAILY_USAGE_CACHE_KEY, normalizeDashboardDailyUsageCache(entries));
+}
+
+export async function upsertDashboardDailyUsageCache(
+  context: vscode.ExtensionContext,
+  accountId: string,
+  usage: CodexDailyUsageBreakdown,
+  fetchedAt = Date.now()
+): Promise<DashboardDailyUsageCacheEntry[]> {
+  const entries = readDashboardDailyUsageCache(context).filter((entry) => entry.accountId !== accountId);
+  entries.push({ accountId, fetchedAt, usage });
+  const normalized = normalizeDashboardDailyUsageCache(entries);
+  await context.globalState.update(DAILY_USAGE_CACHE_KEY, normalized);
+  return normalized;
+}
+
+export function normalizeDashboardDailyUsageCache(value: unknown): DashboardDailyUsageCacheEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is DashboardDailyUsageCacheEntry => {
+      if (!item || typeof item !== "object") return false;
+      const entry = item as Partial<DashboardDailyUsageCacheEntry>;
+      return (
+        typeof entry.accountId === "string" && entry.accountId.length > 0 && entry.accountId.length <= 4096 &&
+        typeof entry.fetchedAt === "number" && Number.isFinite(entry.fetchedAt) &&
+        isDailyUsageBreakdown(entry.usage)
+      );
+    })
+    .sort((left, right) => right.fetchedAt - left.fetchedAt)
+    .slice(0, MAX_DAILY_USAGE_CACHE_ENTRIES);
+}
+
+function isDailyUsageBreakdown(value: unknown): value is CodexDailyUsageBreakdown {
+  if (!value || typeof value !== "object") return false;
+  const usage = value as Partial<CodexDailyUsageBreakdown>;
+  return (
+    typeof usage.days === "number" && Number.isFinite(usage.days) && usage.days >= 1 && usage.days <= 30 &&
+    Array.isArray(usage.points) && usage.points.length <= 31 &&
+    usage.points.every((point) => point && typeof point.date === "string" && point.date.length <= 64 &&
+      typeof point.totalTokens === "number" && Number.isFinite(point.totalTokens) && point.totalTokens >= 0)
+  );
 }
 
 export async function saveDashboardUsageHistory(

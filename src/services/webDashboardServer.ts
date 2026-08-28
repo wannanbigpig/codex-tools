@@ -13,7 +13,11 @@ import { DashboardOAuthCoordinator } from "../presentation/dashboard/oauthCoordi
 import { handleDashboardSettingUpdate, pickDashboardCodexAppPath } from "../presentation/dashboard/settings";
 import { AccountsRepository } from "../storage";
 import { AnnouncementService, type AnnouncementOptions } from "./announcements";
-import { appendDashboardUsageSnapshot, saveDashboardUsageHistory } from "./dashboardUsageHistory";
+import {
+  appendDashboardUsageSnapshot,
+  readDashboardDailyUsageCache,
+  saveDashboardUsageHistory
+} from "./dashboardUsageHistory";
 import {
   hashWebDashboardPassword,
   verifyWebDashboardPassword,
@@ -392,7 +396,11 @@ export class WebDashboardServer implements vscode.Disposable {
       "/assets/codex.svg",
       await this.announcements.getState(this.getAnnouncementOptions())
     );
-    return { ...state, usageHistory: await appendDashboardUsageSnapshot(this.context, state) };
+    return {
+      ...state,
+      usageHistory: await appendDashboardUsageSnapshot(this.context, state),
+      dailyUsageCache: readDashboardDailyUsageCache(this.context)
+    };
   }
 
   private getAnnouncementOptions(): AnnouncementOptions {

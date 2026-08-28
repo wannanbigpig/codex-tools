@@ -459,6 +459,12 @@ describe("executeDashboardActionMessage", () => {
 
   it("loads daily usage only for an explicit account action and caps the requested window", async () => {
     const context = createContext();
+    context.context = {
+      globalState: {
+        get: vi.fn().mockReturnValue([]),
+        update: vi.fn().mockResolvedValue(undefined)
+      }
+    } as unknown as DashboardActionContext["context"];
     const account = { id: "usage-account", email: "usage@example.com" };
     context.repo = {
       getAccount: vi.fn().mockResolvedValue(account),

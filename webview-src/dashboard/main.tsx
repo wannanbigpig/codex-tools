@@ -157,6 +157,15 @@ function App() {
     handleEscape: () => modals.handleEscape(isActionPending("completeOAuthSession"))
   });
   useEffect(() => {
+    if (!snapshot?.dailyUsageCache?.length) return;
+    setDailyUsageByAccount((current) => {
+      const next = { ...current };
+      for (const entry of snapshot.dailyUsageCache ?? []) next[entry.accountId] = entry.usage;
+      return next;
+    });
+  }, [snapshot?.dailyUsageCache]);
+
+  useEffect(() => {
     const terminalNotice = snapshot?.terminalNotice;
     if (!terminalNotice || lastTerminalNoticeAtRef.current === terminalNotice.createdAt) {
       return;

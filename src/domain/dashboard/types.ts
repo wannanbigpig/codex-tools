@@ -329,6 +329,12 @@ export interface DashboardUsageSample {
   review?: number;
 }
 
+export interface DashboardDailyUsageCacheEntry {
+  accountId: string;
+  fetchedAt: number;
+  usage: CodexDailyUsageBreakdown;
+}
+
 export interface DashboardAccountViewModel {
   id: string;
   displayName: string;
@@ -437,6 +443,7 @@ export interface DashboardState {
   terminalNotice?: DashboardNotice & { createdAt: number };
   /** Shared by the VS Code panel and browser dashboard; omitted by older hosts. */
   usageHistory?: DashboardUsageSample[];
+  dailyUsageCache?: DashboardDailyUsageCacheEntry[];
 }
 
 export type DashboardActionName =

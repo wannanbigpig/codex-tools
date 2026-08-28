@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { refreshSingleQuota } from "../../application/accounts/quota";
 import { fetchResetCredits, consumeResetCredit } from "../../services/quota";
 import { fetchDailyUsageBreakdown } from "../../services/usage";
+import { upsertDashboardDailyUsageCache } from "../../services/dashboardUsageHistory";
 import { getDashboardCopy } from "../../application/dashboard/copy";
 import type {
   DashboardActionName,
@@ -341,7 +342,7 @@ async function runDashboardAction(
     case "getResetCredits":
       return handleGetResetCredits(ctx.repo, account);
     case "getDailyUsage":
-      return handleGetDailyUsage(ctx.repo, account, payload?.days);
+      return handleGetDailyUsage(ctx.context, ctx.repo, account, payload?.days);
     case "consumeResetCredit":
       return handleConsumeResetCredit(ctx.repo, account, ctx.schedulePublishState, ctx.resolveLanguage());
     default:
@@ -991,6 +992,7 @@ async function handleGetResetCredits(
 }
 
 async function handleGetDailyUsage(
+  context: vscode.ExtensionContext,
   repo: AccountsRepository,
   account: Awaited<ReturnType<AccountsRepository["getAccount"]>>,
   requestedDays: number | undefined
@@ -1007,6 +1009,7 @@ async function handleGetDailyUsage(
   if (!dailyUsage) {
     throw new Error("The usage endpoint returned no readable data.");
   }
+  await upsertDashboardDailyUsageCache(context, account.id, dailyUsage);
   return { dailyUsage };
 }
 
