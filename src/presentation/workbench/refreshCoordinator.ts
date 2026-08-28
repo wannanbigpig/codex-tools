@@ -5,18 +5,21 @@ import { getAuthJsonPath, readAuthFile } from "../../codex";
 import { getErrorMessage } from "../../core";
 import type { AccountsRepository } from "../../storage";
 import { readCurrentAuthAccountStorageId } from "../../utils/accountIdentity";
-import { getExternalAuthSyncCopy, getLocalAccountCopy } from "../../utils";
+import { getLocalAccountCopy } from "../../utils";
 import { refreshQuotaSummaryPanel } from "../dashboard";
 import { AccountsStatusBarProvider, refreshDetailsPanel } from "../../ui";
 import { needsWindowReloadForAccount, setCurrentWindowRuntimeAccountId } from "./windowRuntimeAccount";
 import { buildWorkbenchRefreshSignature } from "./refreshSignature";
 import { getTokenAutomationSnapshot } from "./tokenAutomationState";
-import { promptWindowReloadForAccount } from "../../application/accounts/switchEffects";
+import { autoReloadWindowForAccount, promptWindowReloadForAccount } from "../../application/accounts/switchEffects";
+import { runCentralAccountOperation } from "../../utils/crossWindowOperations";
 
 type RefreshView = {
   refresh: () => void;
   markObservedAuthIdentity: (accountId?: string) => void;
 };
+
+const CURRENT_WINDOW_ACCOUNT_KEY = "codexAccounts.currentWindowRuntimeAccountId";
 
 export class WorkbenchRefreshCoordinator {
   private lastObservedAuthIdentity?: string;
@@ -30,8 +33,22 @@ export class WorkbenchRefreshCoordinator {
   ) {}
 
   async initializeObservedAuthIdentity(): Promise<void> {
-    this.lastObservedAuthIdentity = await this.readObservedAuthIdentity();
-    setCurrentWindowRuntimeAccountId(this.lastObservedAuthIdentity);
+    const detectedAccountId = await this.readObservedAuthIdentity();
+    const persistedAccountId = this.context.workspaceState.get<string>(CURRENT_WINDOW_ACCOUNT_KEY);
+    const accounts = await this.repo.listAccounts();
+    const knownAccountIds = new Set(accounts.map((account) => account.id));
+    const accountId =
+      (detectedAccountId && (knownAccountIds.size === 0 || knownAccountIds.has(detectedAccountId))
+        ? detectedAccountId
+        : undefined) ??
+      (persistedAccountId && knownAccountIds.has(persistedAccountId) ? persistedAccountId : undefined) ??
+      accounts.find((account) => account.isActive)?.id;
+
+    this.lastObservedAuthIdentity = accountId;
+    setCurrentWindowRuntimeAccountId(accountId);
+    if (accountId && accountId !== persistedAccountId) {
+      await this.context.workspaceState.update(CURRENT_WINDOW_ACCOUNT_KEY, accountId);
+    }
   }
 
   createRefreshView(): RefreshView {
@@ -42,7 +59,11 @@ export class WorkbenchRefreshCoordinator {
         }
         this.refreshTimer = setTimeout(() => {
           this.refreshTimer = undefined;
-          void this.refreshViewsIfNeeded();
+          void this.refreshViewsIfNeeded().catch((error: unknown) => {
+            const detail = getErrorMessage(error);
+            console.error("[codexAccounts] scheduled workbench refresh failed", error);
+            void vscode.window.showWarningMessage(`Account view refresh failed: ${detail}`);
+          });
         }, 0);
       },
       markObservedAuthIdentity: (accountId?: string): void => {
@@ -89,6 +110,19 @@ export class WorkbenchRefreshCoordinator {
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(path.dirname(authPath), path.basename(authPath))
     );
+    const accountsIndexPath = path.join(this.context.globalStorageUri.fsPath, "accounts-index.json");
+    const accountsIndexWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(path.dirname(accountsIndexPath), path.basename(accountsIndexPath))
+    );
+
+    const scheduleIndexRefresh = (): void => {
+      this.repo.invalidateCachedIndex();
+      view.refresh();
+    };
+
+    accountsIndexWatcher.onDidChange(scheduleIndexRefresh, null, this.context.subscriptions);
+    accountsIndexWatcher.onDidCreate(scheduleIndexRefresh, null, this.context.subscriptions);
+    accountsIndexWatcher.onDidDelete(scheduleIndexRefresh, null, this.context.subscriptions);
 
     let syncTimer: NodeJS.Timeout | undefined;
     let promptVisible = false;
@@ -108,7 +142,9 @@ export class WorkbenchRefreshCoordinator {
             promptVisible = false;
           },
           () => promptVisible
-        );
+        ).catch((error: unknown) => {
+          console.warn("[codexAccounts] auth-file synchronization skipped:", error);
+        });
       }, 300);
     };
 
@@ -119,6 +155,7 @@ export class WorkbenchRefreshCoordinator {
     return {
       dispose: (): void => {
         watcher.dispose();
+        accountsIndexWatcher.dispose();
         if (syncTimer) {
           clearTimeout(syncTimer);
         }
@@ -147,17 +184,19 @@ export class WorkbenchRefreshCoordinator {
           cancellable: false
         },
         async () => {
-          const account = await this.repo.importCurrentAuth();
-          this.lastObservedAuthIdentity = account.id;
-          const result = await refreshImportedAccountQuota(this.repo, account.id);
-          view.refresh();
-          await promptWindowReloadForAccount(account);
+          await runCentralAccountOperation("Import current account", async () => {
+            const account = await this.repo.importCurrentAuth();
+            this.lastObservedAuthIdentity = account.id;
+            const result = await refreshImportedAccountQuota(this.repo, account.id);
+            view.refresh();
+            await promptWindowReloadForAccount(account);
 
-          if (result.error) {
-            void vscode.window.showWarningMessage(copy.partial(account.email, result.error.message));
-          } else {
-            void vscode.window.showInformationMessage(copy.success(account.email));
-          }
+            if (result.error) {
+              void vscode.window.showWarningMessage(copy.partial(account.email, result.error.message));
+            } else {
+              void vscode.window.showInformationMessage(copy.success(account.email));
+            }
+          });
         }
       );
     } catch (error) {
@@ -203,17 +242,13 @@ export class WorkbenchRefreshCoordinator {
         return;
       }
 
-      const copy = getExternalAuthSyncCopy();
       markVisible();
-
-      const choice = await vscode.window.showInformationMessage(
-        copy.message(nextActive.accountName ?? nextActive.email),
-        copy.reloadNow,
-        copy.later
-      );
-
-      if (choice === copy.reloadNow) {
-        await vscode.commands.executeCommand("workbench.action.reloadWindow");
+      try {
+        await autoReloadWindowForAccount(nextActive.id);
+      } catch (error) {
+        void vscode.window.showErrorMessage(
+          `This window could not reload after the active account changed in another window. Reload VS Code manually to sync it: ${getErrorMessage(error)}`
+        );
       }
     } finally {
       markHidden();

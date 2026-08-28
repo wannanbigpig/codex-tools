@@ -1,4 +1,4 @@
-import { useEffect } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import type { DashboardHostMessage } from "../../src/domain/dashboard/types";
 import { postMessageToHost } from "./host";
 
@@ -6,16 +6,19 @@ export function useDashboardHostSync(params: {
   handleHostMessage: (message: DashboardHostMessage) => void;
   handleEscape: () => boolean;
 }) {
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+
   useEffect(() => {
     const onMessage = (event: MessageEvent<DashboardHostMessage>) => {
       if (event.data) {
-        params.handleHostMessage(event.data);
+        paramsRef.current.handleHostMessage(event.data);
       }
     };
 
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        params.handleEscape();
+        paramsRef.current.handleEscape();
       }
     };
 
@@ -27,5 +30,5 @@ export function useDashboardHostSync(params: {
       window.removeEventListener("message", onMessage);
       window.removeEventListener("keydown", onKeydown);
     };
-  }, [params]);
+  }, []);
 }

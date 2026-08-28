@@ -25,5 +25,5 @@
     "resolveJsonModule": true,
     "types": []
   },
-  "include": ["webview-src/**/*.ts", "webview-src/**/*.tsx", "src/domain/dashboard/**/*.ts", "src/localization/**/*.ts"]
+  "include": ["webview-src/**/*.ts", "webview-src/**/*.tsx", "src/domain/autoQueueOrder.ts", "src/domain/dashboard/**/*.ts", "src/localization/**/*.ts"]
 }

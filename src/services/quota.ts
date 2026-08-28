@@ -23,7 +23,7 @@ import {
   UsageWindowInfo
 } from "../core/types";
 import { APIError } from "../core/errors";
-import { needsRefresh, refreshTokens } from "../auth/oauth";
+import { needsTokenRefresh, refreshTokens } from "../auth/oauth";
 import { shouldRetryWithoutWorkspace } from "./workspaceRetry";
 import { QUOTA_USAGE_URL, RESET_CREDITS_CONSUME_URL, RESET_CREDITS_URL } from "../infrastructure/config/apiEndpoints";
 import { extractClaims } from "../utils/jwt";
@@ -53,6 +53,7 @@ const quotaCacheGenerations = new Map<string, number>();
 export interface QuotaRefreshResult {
   quota?: CodexQuotaSummary;
   error?: CodexQuotaErrorInfo;
+  skipped?: "disabled";
   updatedTokens?: CodexTokens;
   updatedPlanType?: string;
   updatedSubscriptionActiveUntil?: string;
@@ -69,7 +70,8 @@ export interface QuotaRefreshResult {
 export async function refreshQuota(
   account: CodexAccountRecord,
   tokens: CodexTokens,
-  forceRefresh = false
+  forceRefresh = false,
+  options: { allowTokenRefresh?: boolean } = {}
 ): Promise<QuotaRefreshResult> {
   pruneQuotaCache();
   const generation = getQuotaCacheGeneration(account.id);
@@ -90,13 +92,15 @@ export async function refreshQuota(
 
   const refreshTask = (async (): Promise<QuotaRefreshResult> => {
     let effectiveTokens = tokens;
+    let tokensUpdated = false;
 
-    if (needsRefresh(tokens.accessToken)) {
+    if (needsTokenRefresh(tokens) && options.allowTokenRefresh === true) {
       if (!tokens.refreshToken) {
         return { error: buildError("Token expired and no refresh token is available") };
       }
       effectiveTokens = await refreshTokens(tokens.refreshToken, tokens.idToken);
       effectiveTokens.accountId = effectiveTokens.accountId ?? account.accountId;
+      tokensUpdated = true;
     }
 
     const accountId = account.accountId ?? extractClaims(effectiveTokens.idToken, effectiveTokens.accessToken).accountId;
@@ -113,7 +117,10 @@ export async function refreshQuota(
         : primary;
 
     if (!usageResult.ok) {
-      return { error: buildError(extractErrorMessage(usageResult.status, usageResult.raw)), updatedTokens: effectiveTokens };
+      return {
+        error: buildError(extractErrorMessage(usageResult.status, usageResult.raw)),
+        updatedTokens: tokensUpdated ? effectiveTokens : undefined
+      };
     }
 
     const usage = usageResult.payload;
@@ -128,7 +135,7 @@ export async function refreshQuota(
 
     return {
       quota: quotaSummary,
-      updatedTokens: effectiveTokens,
+      updatedTokens: tokensUpdated ? effectiveTokens : undefined,
       updatedPlanType: usage.plan_type,
       updatedSubscriptionActiveUntil: readUsageSubscriptionActiveUntil(usage)
     };

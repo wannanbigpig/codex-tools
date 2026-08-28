@@ -23,7 +23,12 @@ export const BLOCKING_GLOBAL_ACTIONS = new Set<DashboardActionName>([
   "restoreFromBackup",
   "restoreFromAuthJson",
   "importSharedJson",
-  "downloadJsonFile"
+  "downloadJsonFile",
+  "exportBackup",
+  "configureEncryptedSync",
+  "syncNow",
+  "setEncryptedSyncRegistryOverride",
+  "exportAuthFile"
 ]);
 
 let actionRequestSequence = 0;
@@ -39,8 +44,10 @@ export function getActionTimeoutMs(action: DashboardActionName): number {
     case "dismissHealthIssue":
     case "switch":
     case "refresh":
+    case "refreshToken":
+      return 120_000;
     case "remove":
-    case "toggleStatusBar":
+    case "toggleAccountEnabled":
       return 30_000;
     case "refreshAnnouncements":
     case "markAnnouncementRead":
@@ -52,6 +59,11 @@ export function getActionTimeoutMs(action: DashboardActionName): number {
     case "restoreFromAuthJson":
       return 60_000;
     case "shareTokens":
+    case "exportBackup":
+    case "configureEncryptedSync":
+    case "syncNow":
+    case "setEncryptedSyncRegistryOverride":
+    case "exportAuthFile":
     case "prepareOAuthSession":
     case "cancelOAuthSession":
       return 30_000;

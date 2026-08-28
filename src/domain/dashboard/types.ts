@@ -11,7 +11,10 @@ export type DashboardSettingKey =
   | "codexAppRestartEnabled"
   | "codexAppRestartMode"
   | "backgroundTokenRefreshEnabled"
+  | "autoResumeCodexSessions"
   | "autoRefreshMinutes"
+  | "autoRefreshCurrentMinutes"
+  | "usageHistoryRetentionDays"
   | "autoSwitchEnabled"
   | "hourlyQuotaControlEnabled"
   | "autoSwitchReloadWindowEnabled"
@@ -23,6 +26,8 @@ export type DashboardSettingKey =
   | "quotaGreenThreshold"
   | "quotaYellowThreshold"
   | "debugNetwork"
+  | "encryptedSyncEnabled"
+  | "webDashboardEnabled"
   | "displayLanguage";
 
 export interface DashboardSettings {
@@ -30,7 +35,10 @@ export interface DashboardSettings {
   codexAppRestartEnabled: boolean;
   codexAppRestartMode: "auto" | "manual";
   backgroundTokenRefreshEnabled: boolean;
+  autoResumeCodexSessions: boolean;
   autoRefreshMinutes: number;
+  autoRefreshCurrentMinutes: number;
+  usageHistoryRetentionDays: number;
   autoSwitchEnabled: boolean;
   hourlyQuotaControlEnabled: boolean;
   autoSwitchReloadWindowEnabled: boolean;
@@ -44,6 +52,9 @@ export interface DashboardSettings {
   quotaGreenThreshold: number;
   quotaYellowThreshold: number;
   debugNetwork: boolean;
+  encryptedSyncEnabled: boolean;
+  encryptedSyncRegistryOverrideEnabled: boolean;
+  webDashboardEnabled: boolean;
   displayLanguage: DashboardLanguageOption;
 }
 
@@ -212,6 +223,9 @@ export interface DashboardCopy {
   restartModeNote: string;
   autoRefreshTitle: string;
   autoRefreshSub: string;
+  autoRefreshCurrentTitle: string;
+  autoRefreshCurrentSub: string;
+  autoRefreshCurrentValueDescTemplate: string;
   autoRefreshOn: string;
   autoRefreshOnDesc: string;
   autoRefreshOff: string;
@@ -239,6 +253,7 @@ export interface DashboardCopy {
   autoSwitchLockValueTemplate: string;
   autoSwitchLockValueDescTemplate: string;
   autoSwitchToastSwitched: string;
+  autoSwitchToastSwitchedAndReloaded: string;
   appPathTitle: string;
   appPathSub: string;
   appPathEmpty: string;
@@ -284,6 +299,9 @@ export interface DashboardCopy {
   statusToggleTip: string;
   statusToggleTipChecked: string;
   statusLimitTip: string;
+  accountEnableTip: string;
+  accountDisableTip: string;
+  accountDisabledTag: string;
   unknown: string;
   never: string;
   resetUnknown: string;
@@ -294,11 +312,20 @@ type DashboardMetricKey = string;
 export interface DashboardMetricViewModel {
   key: DashboardMetricKey;
   label: string;
+  period?: "hourly" | "weekly" | "monthly";
   percentage?: number;
   resetAt?: number;
   requestsLeft?: number;
   requestsLimit?: number;
   visible: boolean;
+}
+
+export interface DashboardUsageSample {
+  at: number;
+  accountId: string;
+  hourly?: number;
+  weekly?: number;
+  review?: number;
 }
 
 export interface DashboardAccountViewModel {
@@ -315,16 +342,30 @@ export interface DashboardAccountViewModel {
   subscriptionText: string;
   subscriptionTitle: string;
   subscriptionColor?: string;
+  subscriptionExpiresAt?: number;
   addMethodLabel: string;
   addedAtLabel: string;
+  loginAt?: number;
+  sessionStartedAt?: number;
+  totalUsageMs?: number;
+  runningDeviceName?: string;
+  runningOnThisDevice?: boolean;
+  enablementSyncPending?: boolean;
   statusColor?: string;
   planTypeLabel: string;
   creditsText?: string;
+  creditsBalance?: number;
+  creditsUnlimited?: boolean;
   userId?: string;
   accountId?: string;
   organizationId?: string;
   isActive: boolean;
+  switchQueued: boolean;
   isCurrentWindowAccount: boolean;
+  enabled: boolean;
+  queuePriority: boolean;
+  tokenRefreshEnabled: boolean;
+  canRefreshToken: boolean;
   showInStatusBar: boolean;
   canToggleStatusBar: boolean;
   statusToggleTitle: string;
@@ -381,11 +422,20 @@ export interface DashboardState {
   brandSub: string;
   logoUri: string;
   settings: DashboardSettings;
+  encryptedSyncNeedsConfiguration?: boolean;
+  encryptedSyncNeedsSettingsSync?: boolean;
+  encryptedSyncLastCompletedAt?: number;
+  encryptedSyncSessionCount?: number;
+  encryptedSyncEnabledSessionCount?: number;
   copy: DashboardCopy;
   tokenAutomation: DashboardTokenAutomationViewModel;
   announcements: CodexAnnouncementState;
   indexHealth: CodexIndexHealthSummary;
   accounts: DashboardAccountViewModel[];
+  /** Recent terminal result shown by the dashboard's top toast. */
+  terminalNotice?: DashboardNotice & { createdAt: number };
+  /** Shared by the VS Code panel and browser dashboard; omitted by older hosts. */
+  usageHistory?: DashboardUsageSample[];
 }
 
 export type DashboardActionName =
@@ -396,9 +446,18 @@ export type DashboardActionName =
   | "markAnnouncementRead"
   | "markAllAnnouncementsRead"
   | "shareTokens"
+  | "exportBackup"
+  | "configureEncryptedSync"
+  | "syncNow"
+  | "setEncryptedSyncRegistryOverride"
+  | "openNetworkLogs"
+  | "exportAuthFile"
   | "restoreFromBackup"
   | "restoreFromAuthJson"
   | "copyText"
+  | "openDashboard"
+  | "openWebDashboard"
+  | "setWebDashboardPassword"
   | "openExternalUrl"
   | "downloadJsonFile"
   | "previewImportSharedJson"
@@ -421,7 +480,10 @@ export type DashboardActionName =
   | "switch"
   | "refresh"
   | "remove"
-  | "toggleStatusBar"
+  | "toggleAccountEnabled"
+  | "setAccountQueuePriority"
+  | "setAccountTokenRefreshEnabled"
+  | "refreshToken"
   | "getResetCredits"
   | "consumeResetCredit";
 
@@ -446,10 +508,15 @@ export interface DashboardActionPayload {
   lockMinutes?: number;
   announcementId?: string;
   privacyMode?: boolean;
+  queuePriority?: boolean;
+  tokenRefreshEnabled?: boolean;
+  enabled?: boolean;
 }
 
 export interface DashboardActionResultPayload {
+  notice?: DashboardNotice;
   sharedJson?: string;
+  authJson?: string;
   oauthSession?: DashboardOAuthSessionDescriptor;
   importPreview?: CodexImportPreviewSummary;
   importResult?: CodexImportResultSummary;
@@ -459,6 +526,11 @@ export interface DashboardActionResultPayload {
   email?: string;
   restoredCount?: number;
   resetCredits?: import("../../core/types").CodexResetCreditsSnapshot;
+}
+
+export interface DashboardNotice {
+  level: "info" | "warning" | "error";
+  message: string;
 }
 
 export type DashboardHostMessage =
@@ -474,10 +546,12 @@ export type DashboardHostMessage =
       status: "completed" | "failed";
       payload?: DashboardActionResultPayload;
       error?: string;
-    };
+    }
+  | ({ type: "dashboard:notice" } & DashboardNotice);
 
 export type DashboardClientMessage =
   | { type: "dashboard:ready" }
+  | { type: "dashboard:usage-history"; samples: DashboardUsageSample[] }
   | {
       type: "dashboard:action";
       requestId: string;

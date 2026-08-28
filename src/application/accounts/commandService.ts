@@ -10,8 +10,10 @@ import { extractClaims } from "../../utils/jwt";
 import { runWithConcurrencyLimit } from "../../utils/concurrency";
 import { needsWindowReloadForAccount } from "../../presentation/workbench/windowRuntimeAccount";
 import { getCommandCopy, getLanguage, logNetworkEvent, resolveLongQuotaLabel, t } from "../../utils";
+import { isBackgroundTokenRefreshEnabled } from "../../infrastructure/config/extensionSettings";
 import { openDetailsPanel } from "../../ui";
 import { openQuotaSummaryPanel } from "../../ui/quotaSummary";
+import { consumeResetCredit } from "../../services/quota";
 import {
   RefreshView,
   formatAccountToastLabel,
@@ -21,7 +23,13 @@ import {
   refreshSingleQuota,
   refreshSingleQuotaSafely
 } from "./quota";
+import { compareCodexAccountAutoQueueOrder } from "./autoQueueOrder";
 import { handleCodexAppRestartPreference, promptWindowReloadForAccount } from "./switchEffects";
+import { activateQueuedAccountIfCurrentMissing } from "./queuedAccountActivation";
+import {
+  CrossWindowOperationBusyError,
+  runCentralAccountOperation
+} from "../../utils/crossWindowOperations";
 const REFRESH_ALL_SILENT_CONCURRENCY = 1;
 const REFRESH_ALL_MANUAL_CONCURRENCY = 2;
 const REFRESH_ALL_SILENT_DELAY_MS = 300;
@@ -31,7 +39,9 @@ export class AccountsCommandService {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly repo: AccountsRepository,
-    private readonly view: RefreshView
+    private readonly view: RefreshView,
+    private readonly canRefreshAccount: (accountId: string) => boolean = () => true,
+    private readonly syncAccountChange?: () => Promise<boolean | undefined>
   ) {}
 
   async addAccount(): Promise<void> {
@@ -58,6 +68,10 @@ export class AccountsCommandService {
             accountStructure: account.accountStructure
           });
           const result = await refreshImportedAccountQuota(this.repo, account.id);
+          const queuedActivation = await activateQueuedAccountIfCurrentMissing(this.repo);
+          if (queuedActivation.status === "activated") {
+            this.view.markObservedAuthIdentity?.(queuedActivation.account.id);
+          }
           this.view.refresh();
           logNetworkEvent("account.add", {
             step: "initial-refresh-finished",
@@ -66,10 +80,14 @@ export class AccountsCommandService {
             quotaError: result.error?.message
           });
 
-          if (result.error) {
-            void vscode.window.showWarningMessage(copy.addedButQuotaFailed(account.email, result.error.message));
+          const activationSuffix = formatQueuedActivationSuffix(queuedActivation);
+          if (result.error || queuedActivation.status === "failed") {
+            const message = result.error
+              ? copy.addedButQuotaFailed(account.email, result.error.message)
+              : copy.addedAndRefreshed(account.email);
+            void vscode.window.showWarningMessage(`${message}${activationSuffix}`);
           } else {
-            void vscode.window.showInformationMessage(copy.addedAndRefreshed(account.email));
+            void vscode.window.showInformationMessage(`${copy.addedAndRefreshed(account.email)}${activationSuffix}`);
           }
         },
         { cancellable: true }
@@ -80,13 +98,13 @@ export class AccountsCommandService {
           step: "cancelled",
           message: getErrorMessage(error)
         });
-        return;
+        throw error;
       }
       logNetworkEvent("account.add", {
         step: "failed",
         message: getErrorMessage(error)
       });
-      void vscode.window.showErrorMessage(copy.addAccountFailed(getErrorMessage(error)));
+      throw error;
     }
   }
 
@@ -129,29 +147,55 @@ export class AccountsCommandService {
           return;
         }
 
-        const updated = await this.repo.upsertFromTokens(tokens, account.isActive);
+        const updated = await this.repo.updateTokens(account.id, {
+          ...tokens,
+          accountId: tokens.accountId ?? account.accountId
+        });
         if (account.isActive) {
-          await this.repo.switchAccount(updated.id);
           this.view.markObservedAuthIdentity?.(updated.id);
         }
 
         const result = await refreshImportedAccountQuota(this.repo, updated.id);
+        const queuedActivation = await activateQueuedAccountIfCurrentMissing(this.repo);
+        if (queuedActivation.status === "activated") {
+          this.view.markObservedAuthIdentity?.(queuedActivation.account.id);
+        }
         this.view.refresh();
 
+        // Reauthorization changes the credentials that are shared with other
+        // PCs. Publish the replacement after the local validation/profile
+        // refresh so the next PC receives the complete, current session.
+        let synced: boolean | undefined;
+        if (this.syncAccountChange) {
+          synced = await this.syncAccountChange();
+        }
+
         if (result.error) {
-          void vscode.window.showWarningMessage(copy.importedButQuotaFailed(updated.email, result.error.message));
+          const syncSuffix = synced === false
+            ? " Encrypted sync could not be completed; run Sync Now to share the new credentials."
+            : "";
+          void vscode.window.showWarningMessage(
+            `${copy.importedButQuotaFailed(updated.email, result.error.message)}${syncSuffix}${formatQueuedActivationSuffix(queuedActivation)}`
+          );
+          return;
+        }
+
+        if (synced === false) {
+          void vscode.window.showWarningMessage(
+            `${copy.importedAndRefreshed(updated.email)} Encrypted sync could not be completed; run Sync Now to share the new credentials.${formatQueuedActivationSuffix(queuedActivation)}`
+          );
+          return;
+        }
+
+        if (queuedActivation.status === "failed") {
+          void vscode.window.showWarningMessage(
+            `${copy.importedAndRefreshed(updated.email)}${formatQueuedActivationSuffix(queuedActivation)}`
+          );
           return;
         }
 
         if (account.isActive && needsWindowReloadForAccount(updated.id)) {
-          const choice = await vscode.window.showInformationMessage(
-            copy.switchedAndAskReload(updated.email),
-            copy.reloadNow,
-            copy.later
-          );
-          if (choice === copy.reloadNow) {
-            await vscode.commands.executeCommand("workbench.action.reloadWindow");
-          }
+          await promptWindowReloadForAccount(updated);
           return;
         }
 
@@ -174,7 +218,9 @@ export class AccountsCommandService {
     }
 
     await this.withProgress(copy.progressSwitch(account.email), async () => {
-      await this.repo.switchAccount(account.id);
+      await this.repo.switchAccount(account.id, {
+        forceTokenRefresh: isBackgroundTokenRefreshEnabled() && account.tokenRefreshEnabled === true
+      });
     });
     this.view.markObservedAuthIdentity?.(account.id);
 
@@ -183,19 +229,58 @@ export class AccountsCommandService {
     await promptWindowReloadForAccount(account);
   }
 
+  async autoSelectAccount(): Promise<void> {
+    await maybeAutoSwitchForActiveQuota(this.repo, this.view, {
+      ignoreEnabled: true,
+      userInitiated: true
+    });
+  }
+
+  async consumeResetCredit(item?: CodexAccountRecord): Promise<void> {
+    const account = item ?? (await this.pickAccount("Select an account to reset"));
+    if (!account) return;
+    const available = account.quotaSummary?.resetCreditsAvailable ?? 0;
+    if (available <= 0) {
+      throw new Error(`No reset credits available for ${account.email}`);
+    }
+
+    const confirm = await vscode.window.showWarningMessage(
+      `Reset the rate limit for ${account.email}? You have ${available} reset${available === 1 ? "" : "s"} available.`,
+      { modal: true },
+      "Reset Rate Limit"
+    );
+    if (confirm !== "Reset Rate Limit") return;
+
+    const tokens = await this.repo.getTokens(account.id);
+    if (!tokens?.accessToken) throw new Error("No access token available");
+    await consumeResetCredit(tokens.accessToken, account.accountId ?? undefined);
+    await refreshSingleQuota(this.repo, this.view, account.id, {
+      announce: false,
+      warnQuota: false,
+      refreshView: true
+    });
+  }
+
   async refreshQuota(item?: CodexAccountRecord): Promise<void> {
     const copy = getCommandCopy();
     const account = item ?? (await this.pickAccount(copy.pickRefreshAccount));
     if (!account) {
       return;
     }
-
     await refreshSingleQuota(this.repo, this.view, account.id);
   }
 
-  async refreshAllQuotas(options?: { silent?: boolean; forceRefresh?: boolean }): Promise<void> {
+  async refreshAllQuotas(options?: {
+    silent?: boolean;
+    forceRefresh?: boolean;
+    excludeCurrent?: boolean;
+  }): Promise<void> {
     const copy = getCommandCopy();
-    const accounts = await this.repo.listAccounts();
+    const allAccounts = await this.repo.listAccounts();
+    const currentId = options?.excludeCurrent ? allAccounts.find((account) => account.isActive)?.id : undefined;
+    const accounts = (options?.silent ? allAccounts.filter((account) => account.enabled !== false) : allAccounts)
+      .filter((account) => account.id !== currentId)
+      .filter((account) => !options?.silent || this.canRefreshAccount(account.id));
     let success = 0;
     let failed = 0;
     const refreshAll = async (progress?: vscode.Progress<{ message?: string; increment?: number }>) => {
@@ -207,18 +292,30 @@ export class AccountsCommandService {
           started += 1;
           progress?.report({ message: copy.refreshingStep(started, accounts.length, account.email) });
           if (options?.silent) {
-            await refreshSingleQuotaSafely(this.repo, this.view, account.id, {
-              forceRefresh: options.forceRefresh
-            });
+            try {
+              await runCentralAccountOperation("Quota refresh", () =>
+                refreshSingleQuotaSafely(this.repo, this.view, account.id, {
+                  allowTokenRefresh: isBackgroundTokenRefreshEnabled(),
+                  forceRefresh: options.forceRefresh,
+                  skipDisabled: true
+                })
+              );
+            } catch (error) {
+              if (!(error instanceof CrossWindowOperationBusyError)) {
+                throw error;
+              }
+            }
             return;
           }
           try {
-            await refreshSingleQuota(this.repo, this.view, account.id, {
-              announce: false,
-              forceRefresh: options?.forceRefresh ?? true,
-              refreshView: false,
-              warnQuota: false
-            });
+            await runCentralAccountOperation("Quota refresh", () =>
+              refreshSingleQuota(this.repo, this.view, account.id, {
+                announce: false,
+                forceRefresh: options?.forceRefresh ?? true,
+                refreshView: false,
+                warnQuota: false
+              })
+            );
             success += 1;
           } catch (error) {
             failed += 1;
@@ -268,6 +365,7 @@ export class AccountsCommandService {
 
     await this.repo.removeAccount(account.id);
     this.view.refresh();
+    void vscode.window.showInformationMessage(`Removed account ${formatAccountToastLabel(account)}.`);
   }
 
   async toggleStatusBarAccount(item?: CodexAccountRecord): Promise<void> {
@@ -294,6 +392,33 @@ export class AccountsCommandService {
     }
   }
 
+  async toggleAccountEnabled(item?: CodexAccountRecord): Promise<void> {
+    const account = item ?? (await this.pickAccount("Pick an account to enable or disable"));
+    if (!account) {
+      return;
+    }
+
+    try {
+      await this.repo.setAccountEnabled(account.id, account.enabled === false);
+      this.view.refresh();
+      if (this.syncAccountChange) {
+        const synced = await this.syncAccountChange();
+        // The sync manager owns failure feedback; avoid stacking a second
+        // toast when a retry is needed.
+        if (synced === false) {
+          return;
+        }
+        void vscode.window.showInformationMessage(
+          synced === true ? "Account updated and encrypted sync completed." : "Account updated."
+        );
+      } else {
+        void vscode.window.showInformationMessage("Account updated.");
+      }
+    } catch (error) {
+      void vscode.window.showWarningMessage(getErrorMessage(error));
+    }
+  }
+
   async openDetails(item?: CodexAccountRecord, options?: { privacyMode?: boolean }): Promise<void> {
     const copy = getCommandCopy();
     const account = item ?? (await this.pickAccount(copy.pickInspectAccount));
@@ -307,6 +432,7 @@ export class AccountsCommandService {
   async openCodexHome(): Promise<void> {
     const codexHome = getCodexHome();
     await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(path.join(codexHome, "auth.json")));
+    void vscode.window.showInformationMessage("Opened Codex auth file location.");
   }
 
   showQuotaSummary(): void {
@@ -386,7 +512,7 @@ export class AccountsCommandService {
   }
 
   private async pickAccount(placeHolder: string): Promise<CodexAccountRecord | undefined> {
-    const accounts = await this.repo.listAccounts();
+    const accounts = (await this.repo.listAccounts()).slice().sort(compareCodexAccountAutoQueueOrder);
     if (!accounts.length) {
       void vscode.window.showInformationMessage(getCommandCopy().noAccounts);
       return undefined;
@@ -405,7 +531,7 @@ export class AccountsCommandService {
   }
 
   private async pickSwitchAccount(placeHolder: string): Promise<CodexAccountRecord | undefined> {
-    const accounts = await this.repo.listAccounts();
+    const accounts = (await this.repo.listAccounts()).slice().sort(compareCodexAccountAutoQueueOrder);
     if (!accounts.length) {
       void vscode.window.showInformationMessage(getCommandCopy().noAccounts);
       return undefined;
@@ -455,6 +581,18 @@ export class AccountsCommandService {
       callback
     );
   }
+}
+
+function formatQueuedActivationSuffix(
+  result: Awaited<ReturnType<typeof activateQueuedAccountIfCurrentMissing>>
+): string {
+  if (result.status === "activated") {
+    return `. Activated queued account ${formatAccountToastLabel(result.account)} because no current account was available.`;
+  }
+  if (result.status === "failed") {
+    return `. The account was added, but queued-account activation failed: ${result.message}`;
+  }
+  return "";
 }
 
 function isOauthCancelled(error: unknown): boolean {

@@ -4,6 +4,9 @@ import { buildAccountStorageId } from "../utils/accountIdentity";
 import { extractClaims } from "../utils/jwt";
 
 export function toSharedAccountJson(account: CodexAccountRecord, tokens: CodexTokens): SharedCodexAccountJson {
+  // Do not add account.enabled or account.queuePriority here. They select
+  // automation accounts on this PC and must not follow a session through
+  // backup or encrypted sync.
   return {
     id: account.id,
     email: account.email,
@@ -31,23 +34,43 @@ export function toSharedAccountJson(account: CodexAccountRecord, tokens: CodexTo
         }
       : null,
     tags: account.tags?.length ? [...account.tags] : null,
+    token_refresh_enabled: account.tokenRefreshEnabled === true,
     created_at: Math.floor(account.createdAt / 1000),
     last_used: Math.floor(account.updatedAt / 1000)
   };
 }
 
 export function previewSharedEntry(entry: SharedCodexAccountJson): { storageId?: string; email?: string } {
-  const restoredTokens = restoreSharedTokens(entry);
-  const claims = extractClaims(restoredTokens.idToken, restoredTokens.accessToken);
-  if (!claims.email) {
+  const identity = resolveSharedAccountIdentity(entry);
+  if (!identity.email) {
     throw new AccountError("Shared account JSON does not include a valid email in tokens", {
       code: ErrorCode.ACCOUNT_INVALID_DATA
     });
   }
 
   return {
-    storageId: buildAccountStorageId(claims.email, claims.accountId, claims.organizationId),
-    email: claims.email
+    storageId: buildAccountStorageId(identity.email, identity.accountId, identity.organizationId),
+    email: identity.email
+  };
+}
+
+export function resolveSharedAccountIdentity(entry: SharedCodexAccountJson): {
+  email?: string;
+  accountId?: string;
+  organizationId?: string;
+} {
+  const restoredTokens = restoreSharedTokens(entry);
+  let claims: ReturnType<typeof extractClaims> = {};
+  try {
+    claims = extractClaims(restoredTokens.idToken, restoredTokens.accessToken);
+  } catch {
+    // The exported metadata remains a valid identity source for legacy
+    // sessions whose ID token is opaque or no longer decodable.
+  }
+  return {
+    email: claims.email ?? sanitizeOptionalValue(entry.email),
+    accountId: claims.accountId ?? restoredTokens.accountId ?? sanitizeOptionalValue(entry.account_id),
+    organizationId: claims.organizationId ?? sanitizeOptionalValue(entry.organization_id)
   };
 }
 
@@ -68,7 +91,7 @@ export function restoreSharedTokens(entry: SharedCodexAccountJson): CodexTokens 
   };
 }
 
-export function normalizeAccountTags(tags: unknown, fallback?: string[] | null | undefined): string[] | undefined {
+export function normalizeAccountTags(tags: unknown, fallback?: string[] | null): string[] | undefined {
   const source = Array.isArray(tags) ? tags : Array.isArray(fallback) ? fallback : [];
   const normalized = Array.from(
     new Map(
@@ -155,7 +178,8 @@ export function fromSharedQuotaError(
 }
 
 export function sanitizeOptionalValue(value: unknown): string | undefined {
-  const normalized = typeof value === "string" ? value : value == null ? undefined : String(value);
+  const normalized =
+    typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : undefined;
   const trimmed = normalized?.trim();
   return trimmed ?? undefined;
 }
@@ -222,12 +246,9 @@ function toSharedQuota(summary?: CodexQuotaSummary): SharedCodexAccountJson["quo
           has_credits: summary.credits.hasCredits,
           unlimited: summary.credits.unlimited,
           overage_limit_reached: summary.credits.overageLimitReached,
-          balance: summary.credits.balance,
-          approx_local_messages: summary.credits.approxLocalMessages,
-          approx_cloud_messages: summary.credits.approxCloudMessages
+          balance: summary.credits.balance
         }
-      : null,
-    raw_data: summary.rawData ?? null
+      : null
   };
 }
 

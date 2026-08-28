@@ -7,7 +7,7 @@ import type {
   DashboardHostMessage,
   DashboardSettingKey
 } from "../../domain/dashboard/types";
-import { ExtensionSettingsStore } from "../../infrastructure/config/extensionSettings";
+import { ExtensionSettingsStore, getCodexAccountsConfiguration } from "../../infrastructure/config/extensionSettings";
 import { AccountsRepository } from "../../storage";
 import { AnnouncementService, type AnnouncementOptions } from "../../services/announcements";
 import { renderDashboardShell } from "./shell";
@@ -16,9 +16,12 @@ import { executeDashboardActionMessage } from "./actionHandlers";
 import { clearDashboardCodexAppPath, dispatchDashboardClientMessage } from "./messageDispatcher";
 import { DashboardOAuthCoordinator } from "./oauthCoordinator";
 import { backfillMissingResetCreditExpiries } from "./resetCreditsBackfill";
+import { withDashboardNotificationSuppression } from "../../utils/notificationPolicy";
+import { saveDashboardUsageHistory } from "../../services/dashboardUsageHistory";
 import { handleDashboardSettingUpdate, pickDashboardCodexAppPath } from "./settings";
 
 const DASHBOARD_VIEW_TYPE = "codexQuotaSummary";
+const REOPEN_AFTER_HOST_RESTART_KEY = "codexAccounts.reopenDashboardAfterHostRestart";
 
 let dashboardPanelController: DashboardPanelController | undefined;
 
@@ -35,13 +38,10 @@ type PublishDashboardSnapshotParams = {
 };
 
 export async function publishDashboardSnapshot(params: PublishDashboardSnapshotParams): Promise<string | undefined> {
-  const state = await buildDashboardState(
-    params.repo,
-    params.settingsStore,
-    params.logoUri,
-    params.announcementsState
+  const state = await buildDashboardState(params.repo, params.settingsStore, params.logoUri, params.announcementsState);
+  void backfillMissingResetCreditExpiries(params.repo, state.accounts, params.schedulePublishState).catch(
+    () => undefined
   );
-  void backfillMissingResetCreditExpiries(params.repo, state.accounts, params.schedulePublishState).catch(() => undefined);
 
   params.setPanelTitle(state.panelTitle);
   const signature = buildDashboardStateSignature(state);
@@ -71,9 +71,18 @@ class DashboardPanelController {
     private readonly repo: AccountsRepository
   ) {
     this.announcements = new AnnouncementService(context.globalStorageUri.fsPath, context.extensionUri.fsPath);
-    this.oauth = new DashboardOAuthCoordinator(repo, () => {
-      this.schedulePublishState();
-    });
+    this.oauth = new DashboardOAuthCoordinator(
+      repo,
+      () => {
+        this.schedulePublishState();
+      },
+      async () => {
+        if (!getCodexAccountsConfiguration().get<boolean>("encryptedSyncEnabled", false)) {
+          return undefined;
+        }
+        return vscode.commands.executeCommand<boolean>("codexAccounts.syncNow", { announceSuccess: false });
+      }
+    );
   }
 
   open(): void {
@@ -120,7 +129,15 @@ class DashboardPanelController {
           },
           onClearCodexAppPath: async () => {
             await clearDashboardCodexAppPath();
+          },
+          onUsageHistory: async (samples) => {
+            await saveDashboardUsageHistory(this.context, samples);
           }
+        }).catch((error) => {
+          const detail = error instanceof Error ? error.message : String(error);
+          console.error(`[codexAccounts] dashboard request failed: ${message.type}`, error);
+          void this.postNotice("error", `The dashboard request failed: ${detail}`).catch(() => undefined);
+          void this.publishState(true).catch(() => undefined);
         });
       });
 
@@ -151,7 +168,7 @@ class DashboardPanelController {
   }
 
   private getPanelIconUri(): vscode.Uri {
-    return vscode.Uri.joinPath(this.context.extensionUri, "media", "CT_logo_transparent_square_hd.png");
+    return vscode.Uri.joinPath(this.context.extensionUri, "media", "product-icons", "codex-openai.svg");
   }
 
   private getTargetViewColumn(): vscode.ViewColumn {
@@ -170,7 +187,11 @@ class DashboardPanelController {
 
     this.publishTimer = setTimeout(() => {
       this.publishTimer = undefined;
-      void this.publishState();
+      void this.publishState().catch((error: unknown) => {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.error("[codexAccounts] scheduled dashboard publish failed", error);
+        void this.postNotice("error", `Dashboard refresh failed: ${detail}`).catch(() => undefined);
+      });
     }, delayMs);
   }
 
@@ -180,7 +201,7 @@ class DashboardPanelController {
     }
 
     const logoUri = this.panel.webview
-      .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "CT_logo_transparent_square_hd.png"))
+      .asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "product-icons", "codex-openai.svg"))
       .toString();
     const signature = await publishDashboardSnapshot({
       repo: this.repo,
@@ -207,18 +228,20 @@ class DashboardPanelController {
   private async handleActionMessage(
     message: Extract<DashboardClientMessage, { type: "dashboard:action" }>
   ): Promise<void> {
-    const result = await executeDashboardActionMessage(
-      {
-        context: this.context,
-        repo: this.repo,
-        resolveLanguage: () => this.settingsStore.resolveLanguage(),
-        schedulePublishState: () => this.schedulePublishState(),
-        publishState: async (force = false) => this.publishState(force),
-        oauth: this.oauth,
-        announcements: this.announcements,
-        getAnnouncementOptions: () => this.getAnnouncementOptions()
-      },
-      message
+    const result = await withDashboardNotificationSuppression(() =>
+      executeDashboardActionMessage(
+        {
+          context: this.context,
+          repo: this.repo,
+          resolveLanguage: () => this.settingsStore.resolveLanguage(),
+          schedulePublishState: () => this.schedulePublishState(),
+          publishState: async (force = false) => this.publishState(force),
+          oauth: this.oauth,
+          announcements: this.announcements,
+          getAnnouncementOptions: () => this.getAnnouncementOptions()
+        },
+        message
+      )
     );
 
     await this.postActionResult(
@@ -254,11 +277,32 @@ class DashboardPanelController {
     } satisfies DashboardHostMessage);
   }
 
+  async prepareForExtensionHostRestart(): Promise<boolean> {
+    if (!this.panel) {
+      return false;
+    }
+    await this.context.workspaceState.update(REOPEN_AFTER_HOST_RESTART_KEY, true);
+    this.panel.dispose();
+    return true;
+  }
+
+  private async postNotice(level: "info" | "warning" | "error", message: string): Promise<void> {
+    if (!this.panel) {
+      return;
+    }
+    await this.panel.webview.postMessage({
+      type: "dashboard:notice",
+      level,
+      message
+    } satisfies DashboardHostMessage);
+  }
+
   private async handleSettingUpdate(key: DashboardSettingKey, value: string | number | boolean): Promise<void> {
     const updated = await handleDashboardSettingUpdate(key, value);
-    if (updated) {
-      this.schedulePublishState();
+    if (!updated) {
+      throw new Error(`The ${key} setting could not be updated.`);
     }
+    this.schedulePublishState();
   }
 
   private async pickCodexAppPath(): Promise<void> {
@@ -277,6 +321,21 @@ class DashboardPanelController {
 export function openQuotaSummaryPanel(context: vscode.ExtensionContext, repo: AccountsRepository): void {
   dashboardPanelController ??= new DashboardPanelController(context, repo);
   dashboardPanelController.open();
+}
+
+export async function prepareQuotaSummaryPanelForExtensionHostRestart(): Promise<boolean> {
+  return dashboardPanelController?.prepareForExtensionHostRestart() ?? false;
+}
+
+export async function restoreQuotaSummaryPanelAfterExtensionHostRestart(
+  context: vscode.ExtensionContext,
+  repo: AccountsRepository
+): Promise<void> {
+  if (!context.workspaceState.get<boolean>(REOPEN_AFTER_HOST_RESTART_KEY, false)) {
+    return;
+  }
+  await context.workspaceState.update(REOPEN_AFTER_HOST_RESTART_KEY, false);
+  openQuotaSummaryPanel(context, repo);
 }
 
 export async function refreshQuotaSummaryPanel(): Promise<void> {

@@ -5,15 +5,21 @@ import {
   ExtensionSettingsStore,
   getCodexAccountsConfiguration,
   normalizeAutoRefreshMinutes,
-  normalizeDashboardTheme
+  normalizeAutoSwitchLockMinutes,
+  normalizeAutoSwitchThreshold,
+  normalizeDashboardTheme,
+  normalizeQuotaWarningThreshold,
+  normalizeUsageHistoryRetentionDays
 } from "../../infrastructure/config/extensionSettings";
 import { isDashboardLanguageOption } from "../../localization/languages";
+import { normalizeQuotaColorThresholds } from "../../utils";
 
-type DashboardConfigurationKey = DashboardSettingKey | "codexAppPath";
+export type DashboardConfigurationKey = DashboardSettingKey | "codexAppPath";
 
 export async function handleDashboardSettingUpdate(
-  key: DashboardSettingKey,
-  value: string | number | boolean
+  key: DashboardConfigurationKey,
+  value: string | number | boolean,
+  target?: vscode.ConfigurationTarget
 ): Promise<boolean> {
   const config = getCodexAccountsConfiguration();
   let updated = false;
@@ -21,7 +27,7 @@ export async function handleDashboardSettingUpdate(
   switch (key) {
     case "dashboardTheme":
       if (typeof value === "string") {
-        await updateDashboardConfiguration(config, key, normalizeDashboardTheme(value));
+        await updateDashboardConfiguration(config, key, normalizeDashboardTheme(value), target);
         updated = true;
       }
       break;
@@ -30,39 +36,83 @@ export async function handleDashboardSettingUpdate(
     case "hourlyQuotaControlEnabled":
     case "autoSwitchReloadWindowEnabled":
     case "backgroundTokenRefreshEnabled":
+    case "autoResumeCodexSessions":
     case "quotaWarningEnabled":
     case "debugNetwork":
+    case "encryptedSyncEnabled":
+    case "webDashboardEnabled":
       if (typeof value === "boolean") {
-        await updateDashboardConfiguration(config, key, value);
+        await updateDashboardConfiguration(config, key, value, target);
         updated = true;
       }
       break;
     case "codexAppRestartMode":
       if (value === "auto" || value === "manual") {
-        await updateDashboardConfiguration(config, key, value);
+        await updateDashboardConfiguration(config, key, value, target);
         updated = true;
       }
       break;
     case "autoSwitchHourlyThreshold":
     case "autoSwitchWeeklyThreshold":
+      if (typeof value === "number") {
+        await updateDashboardConfiguration(config, key, normalizeAutoSwitchThreshold(value), target);
+        updated = true;
+      }
+      break;
     case "quotaWarningThreshold":
+      if (typeof value === "number") {
+        await updateDashboardConfiguration(config, key, normalizeQuotaWarningThreshold(value), target);
+        updated = true;
+      }
+      break;
     case "quotaGreenThreshold":
+      if (typeof value === "number") {
+        const normalized = normalizeQuotaColorThresholds(
+          snapToAllowed(value, [50, 60, 70, 80, 90], 60),
+          config.get<number>("quotaYellowThreshold", 20)
+        );
+        await updateDashboardConfiguration(config, key, normalized.green, target);
+        updated = true;
+      }
+      break;
     case "quotaYellowThreshold":
+      if (typeof value === "number") {
+        const normalized = normalizeQuotaColorThresholds(
+          config.get<number>("quotaGreenThreshold", 60),
+          snapToAllowed(value, [10, 20, 30, 40, 50], 20)
+        );
+        await updateDashboardConfiguration(config, key, normalized.yellow, target);
+        updated = true;
+      }
+      break;
     case "autoSwitchLockMinutes":
       if (typeof value === "number") {
-        await updateDashboardConfiguration(config, key, value);
+        await updateDashboardConfiguration(config, key, normalizeAutoSwitchLockMinutes(value), target);
         updated = true;
       }
       break;
     case "autoRefreshMinutes":
+    case "autoRefreshCurrentMinutes":
       if (typeof value === "number") {
-        await updateDashboardConfiguration(config, key, normalizeAutoRefreshMinutes(value));
+        await updateDashboardConfiguration(config, key, normalizeAutoRefreshMinutes(value), target);
+        updated = true;
+      }
+      break;
+    case "usageHistoryRetentionDays":
+      if (typeof value === "number") {
+        await updateDashboardConfiguration(config, key, normalizeUsageHistoryRetentionDays(value), target);
         updated = true;
       }
       break;
     case "displayLanguage":
       if (typeof value === "string" && isDashboardLanguageOption(value)) {
-        await updateDashboardConfiguration(config, key, value);
+        await updateDashboardConfiguration(config, key, value, target);
+        updated = true;
+      }
+      break;
+    case "codexAppPath":
+      if (typeof value === "string") {
+        await updateDashboardConfiguration(config, key, value, target);
         updated = true;
       }
       break;
@@ -73,12 +123,20 @@ export async function handleDashboardSettingUpdate(
   return updated;
 }
 
+function snapToAllowed(value: number, allowed: readonly number[], fallback: number): number {
+  if (!Number.isFinite(value)) {return fallback;}
+  return allowed.reduce((closest, candidate) =>
+    Math.abs(candidate - value) < Math.abs(closest - value) ? candidate : closest
+  , fallback);
+}
+
 async function updateDashboardConfiguration(
   config: vscode.WorkspaceConfiguration,
   key: DashboardConfigurationKey,
-  value: string | number | boolean
+  value: string | number | boolean,
+  target?: vscode.ConfigurationTarget
 ): Promise<void> {
-  await config.update(key, value, resolveConfigurationTarget(config, key));
+  await config.update(key, value, target ?? resolveConfigurationTarget(config, key));
 }
 
 function resolveConfigurationTarget(
@@ -95,7 +153,9 @@ function resolveConfigurationTarget(
   return vscode.ConfigurationTarget.Global;
 }
 
-export async function pickDashboardCodexAppPath(settingsStore: Pick<ExtensionSettingsStore, "resolveLanguage">): Promise<void> {
+export async function pickDashboardCodexAppPath(
+  settingsStore: Pick<ExtensionSettingsStore, "resolveLanguage">
+): Promise<void> {
   const pickerCopy = getDashboardCopy(settingsStore.resolveLanguage());
   const selected = await vscode.window.showOpenDialog({
     canSelectFiles: true,

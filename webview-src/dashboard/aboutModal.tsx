@@ -184,8 +184,8 @@ export function AboutModal(props: {
     >
       <div class="about-card">
         <section class="about-hero">
-          <img class="about-logo" src={props.logoUri} alt="Codex Accounts Manager logo" />
-          <h2 class="about-title">Codex Accounts Manager</h2>
+          <img class="about-logo" src={props.logoUri} alt="Codex Manager logo" />
+          <h2 class="about-title">Codex Manager</h2>
           <div class="about-chip-row">
             <span class="about-chip">v{props.version}</span>
             <span class="about-chip">{text.extensionChip}</span>

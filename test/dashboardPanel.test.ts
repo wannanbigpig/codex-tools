@@ -26,6 +26,7 @@ function createState(): DashboardState {
       dashboardTheme: "dark",
       displayLanguage: "en",
       autoRefreshMinutes: 0,
+      autoRefreshCurrentMinutes: 0,
       backgroundTokenRefreshEnabled: true,
       autoSwitchEnabled: false,
       hourlyQuotaControlEnabled: false,

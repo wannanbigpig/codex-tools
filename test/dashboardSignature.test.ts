@@ -5,16 +5,21 @@ import type { DashboardState } from "../src/domain/dashboard/types";
 function createState(overrides?: {
   resetCreditsAvailable?: number;
   resetCreditsNextExpiresAt?: number;
+  totalUsageMs?: number;
+  runningDeviceName?: string;
+  encryptedSyncNeedsSettingsSync?: boolean;
 }): DashboardState {
   return {
     lang: "zh",
     panelTitle: "title",
     brandSub: "sub",
     logoUri: "logo",
+    encryptedSyncNeedsSettingsSync: overrides?.encryptedSyncNeedsSettingsSync,
     settings: {
       dashboardTheme: "dark",
       displayLanguage: "zh",
       autoRefreshMinutes: 0,
+      autoRefreshCurrentMinutes: 0,
       backgroundTokenRefreshEnabled: true,
       autoSwitchEnabled: false,
       hourlyQuotaControlEnabled: false,
@@ -56,7 +61,9 @@ function createState(overrides?: {
         dismissedHealth: false,
         metrics: [],
         resetCreditsAvailable: overrides?.resetCreditsAvailable,
-        resetCreditsNextExpiresAt: overrides?.resetCreditsNextExpiresAt
+        resetCreditsNextExpiresAt: overrides?.resetCreditsNextExpiresAt,
+        totalUsageMs: overrides?.totalUsageMs,
+        runningDeviceName: overrides?.runningDeviceName
       } as DashboardState["accounts"][number]
     ]
   };
@@ -68,6 +75,27 @@ describe("buildDashboardStateSignature", () => {
     const after = buildDashboardStateSignature(
       createState({ resetCreditsAvailable: 1, resetCreditsNextExpiresAt: 1_800_000_000 })
     );
+
+    expect(after).not.toBe(before);
+  });
+
+  it("changes when account usage duration changes", () => {
+    const before = buildDashboardStateSignature(createState({ totalUsageMs: 60_000 }));
+    const after = buildDashboardStateSignature(createState({ totalUsageMs: 120_000 }));
+
+    expect(after).not.toBe(before);
+  });
+
+  it("changes when a synced PC starts running the account", () => {
+    const before = buildDashboardStateSignature(createState());
+    const after = buildDashboardStateSignature(createState({ runningDeviceName: "Office PC" }));
+
+    expect(after).not.toBe(before);
+  });
+
+  it("changes when VS Code Settings Sync becomes inactive", () => {
+    const before = buildDashboardStateSignature(createState());
+    const after = buildDashboardStateSignature(createState({ encryptedSyncNeedsSettingsSync: true }));
 
     expect(after).not.toBe(before);
   });

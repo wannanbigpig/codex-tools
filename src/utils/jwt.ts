@@ -95,7 +95,18 @@ export function extractClaims(idToken: string, accessToken?: string): DecodedAut
   }
 
   const idPayload = decodeJwtPayload(idToken);
-  const accessPayload = accessToken ? decodeJwtPayload(accessToken) : undefined;
+  // Access tokens are used only as a supplemental claim source. Older,
+  // invalidated, and some provider-issued sessions can contain an opaque
+  // access token while the ID token remains a valid JWT. Do not reject the
+  // whole account in that case.
+  let accessPayload: Record<string, unknown> | undefined;
+  if (accessToken) {
+    try {
+      accessPayload = decodeJwtPayload(accessToken);
+    } catch {
+      accessPayload = undefined;
+    }
+  }
   const idAuth = (idPayload["https://api.openai.com/auth"] ?? {}) as Record<string, unknown>;
   const accessAuth = (accessPayload?.["https://api.openai.com/auth"] ?? {}) as Record<string, unknown>;
   const idProfile = (idPayload["https://api.openai.com/profile"] ?? {}) as Record<string, unknown>;
@@ -175,7 +186,15 @@ function getTokenExpiryEpochSeconds(token: string): number | undefined {
  * @returns 是否已过期
  */
 export function isTokenExpired(token: string, skewSeconds = 60): boolean {
-  const exp = getTokenExpiryEpochSeconds(token);
+  let exp: number | undefined;
+  try {
+    exp = getTokenExpiryEpochSeconds(token);
+  } catch {
+    // Opaque and invalidated access tokens do not expose an expiry claim.
+    // Treat the expiry as unknown; the API/refresh path will report whether
+    // the credential is usable without breaking account import or storage.
+    return false;
+  }
   if (!exp) {
     return false;
   }

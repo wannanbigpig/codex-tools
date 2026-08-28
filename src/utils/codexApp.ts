@@ -114,11 +114,11 @@ export function getCodexAppCandidates(
     case "darwin":
       return [
         "/Applications/ChatGPT.app",
-        path.join(homeDirectory, "Applications", "ChatGPT.app"),
+        path.posix.join(homeDirectory.replace(/\\/g, "/"), "Applications", "ChatGPT.app"),
         "/Applications/Codex.app",
         "/Applications/OpenAI Codex.app",
-        path.join(homeDirectory, "Applications", "Codex.app"),
-        path.join(homeDirectory, "Applications", "OpenAI Codex.app")
+        path.posix.join(homeDirectory.replace(/\\/g, "/"), "Applications", "Codex.app"),
+        path.posix.join(homeDirectory.replace(/\\/g, "/"), "Applications", "OpenAI Codex.app")
       ];
     case "win32":
       return WINDOWS_APP_CANDIDATES;

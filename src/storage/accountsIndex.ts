@@ -4,27 +4,58 @@ import type { CodexAccountRecord, CodexAccountsIndex } from "../core/types";
 import { normalizeQuotaSummary } from "../utils/quotaWindows";
 import { normalizeAccountTags } from "./sharedAccounts";
 
-export function markActive(index: CodexAccountsIndex, accountId: string): void {
+export function markActive(index: CodexAccountsIndex, accountId: string, now = Date.now()): void {
+  const startsNewSession = index.currentAccountId !== accountId;
+  const previousAccountId = index.currentAccountId;
   index.currentAccountId = accountId;
   for (const account of index.accounts) {
-    account.isActive = account.id === accountId;
+    const nextActive = account.id === accountId;
+    if (startsNewSession && account.id === previousAccountId) {
+      completeAccountUsageSession(account, now);
+    }
+    account.isActive = nextActive;
+    if (nextActive && (startsNewSession || account.sessionStartedAt == null)) {
+      account.sessionStartedAt = now;
+    }
   }
 }
 
-export function syncActiveAccountState(index: CodexAccountsIndex, accountId: string | undefined): boolean {
+export function syncActiveAccountState(index: CodexAccountsIndex, accountId: string | undefined, now = Date.now()): boolean {
   const normalizedAccountId = accountId && index.accounts.some((account) => account.id === accountId) ? accountId : undefined;
-  let changed = index.currentAccountId !== normalizedAccountId;
+  const startsNewSession = index.currentAccountId !== normalizedAccountId;
+  const previousAccountId = index.currentAccountId;
+  let changed = startsNewSession;
   index.currentAccountId = normalizedAccountId;
 
   for (const account of index.accounts) {
     const nextActive = account.id === normalizedAccountId;
+    if (startsNewSession && account.id === previousAccountId) {
+      completeAccountUsageSession(account, now);
+      changed = true;
+    }
     if (account.isActive !== nextActive) {
       account.isActive = nextActive;
+      changed = true;
+    }
+    if (nextActive && (startsNewSession || account.sessionStartedAt == null)) {
+      account.sessionStartedAt = now;
       changed = true;
     }
   }
 
   return changed;
+}
+
+function completeAccountUsageSession(account: CodexAccountRecord, now: number): void {
+  if (typeof account.sessionStartedAt === "number" && Number.isFinite(account.sessionStartedAt)) {
+    const elapsed = Math.max(0, now - account.sessionStartedAt);
+    const previous =
+      typeof account.totalUsageMs === "number" && Number.isFinite(account.totalUsageMs)
+        ? Math.max(0, account.totalUsageMs)
+        : 0;
+    account.totalUsageMs = previous + elapsed;
+  }
+  account.sessionStartedAt = undefined;
 }
 
 export function createEmptyIndex(): CodexAccountsIndex {
@@ -105,6 +136,10 @@ function isValidAccountsIndex(value: unknown): value is CodexAccountsIndex {
       typeof record.email === "string" &&
       typeof record.createdAt === "number" &&
       typeof record.updatedAt === "number" &&
+      (record.sessionStartedAt === undefined ||
+        (typeof record.sessionStartedAt === "number" && Number.isFinite(record.sessionStartedAt))) &&
+      (record.totalUsageMs === undefined ||
+        (typeof record.totalUsageMs === "number" && Number.isFinite(record.totalUsageMs) && record.totalUsageMs >= 0)) &&
       (record.tags === undefined || (Array.isArray(record.tags) && record.tags.every((tag) => typeof tag === "string")))
     );
   });

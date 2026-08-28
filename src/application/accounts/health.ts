@@ -1,4 +1,4 @@
-import { isTokenExpired } from "../../utils/jwt";
+import { needsTokenRefresh } from "../../auth/oauth";
 import { CodexAccountRecord, CodexTokens } from "../../core/types";
 import { getQuotaIssueKind } from "../../utils/quotaIssue";
 import type { AccountAutomationState, TokenAutomationSnapshot } from "../../presentation/workbench/tokenAutomationState";
@@ -51,12 +51,15 @@ export function resolveAccountHealth(
     };
   }
 
-  if (
-    automation.enabled &&
-    tokens?.accessToken &&
-    tokens.refreshToken &&
-    isTokenExpired(tokens.accessToken, automation.skewSeconds || 600)
-  ) {
+  if (tokens?.accessToken && tokens.idToken && needsTokenRefresh(tokens, automation.skewSeconds || 600)) {
+    if (!tokens.refreshToken?.trim()) {
+      return {
+        kind: "reauthorize",
+        issueKey: buildIssueKey("reauthorize", undefined, tokens.accountId ?? account.accountId),
+        message: "Token expired and no refresh token is available"
+      };
+    }
+
     return {
       kind: "expiring",
       issueKey: buildIssueKey("expiring", undefined, tokens.accountId ?? account.accountId),

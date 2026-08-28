@@ -1,5 +1,6 @@
 import type { DashboardHostMessage } from "../../domain/dashboard/types";
 import type {
+  CodexAccountsBackup,
   CodexAccountsRestoreResult,
   CodexImportResultSummary,
   SharedCodexAccountJson
@@ -8,11 +9,14 @@ import type {
 export function parseSharedJsonInput(
   jsonText: string,
   onParseError?: (message: string) => string
-): SharedCodexAccountJson | SharedCodexAccountJson[] {
+): SharedCodexAccountJson | SharedCodexAccountJson[] | CodexAccountsBackup {
   const normalized = jsonText.trim();
   if (!normalized) {
     const message = onParseError ? onParseError("Empty JSON input") : "Empty JSON input";
     throw new Error(message);
+  }
+  if (normalized.length > 32 * 1024 * 1024) {
+    throw new Error(onParseError ? onParseError("JSON input exceeds the 32 MB safety limit") : "JSON input exceeds the 32 MB safety limit");
   }
 
   try {

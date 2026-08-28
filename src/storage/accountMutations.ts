@@ -92,16 +92,66 @@ export function removeAccountTags(
   return updated;
 }
 
-export function switchActiveAccount(index: CodexAccountsIndex, accountId: string): CodexAccountRecord | undefined {
+export function switchActiveAccount(
+  index: CodexAccountsIndex,
+  accountId: string,
+  now = Date.now()
+): CodexAccountRecord | undefined {
   const account = index.accounts.find((item) => item.id === accountId);
   if (!account) {
     return undefined;
   }
 
   const previousActiveId = index.currentAccountId;
-  markActive(index, accountId);
+  markActive(index, accountId, now);
   reconcileStatusBarSelections(index, accountId, previousActiveId);
   return index.accounts.find((item) => item.id === accountId);
+}
+
+export function setAccountEnabled(
+  index: CodexAccountsIndex,
+  accountId: string,
+  enabled: boolean,
+  _now: number
+): CodexAccountRecord | undefined {
+  const account = index.accounts.find((item) => item.id === accountId);
+  if (!account) {
+    return undefined;
+  }
+
+  account.enabled = enabled;
+  return account;
+}
+
+export function setAccountQueuePriority(
+  index: CodexAccountsIndex,
+  accountId: string,
+  queuePriority: boolean,
+  _now: number
+): CodexAccountRecord | undefined {
+  const account = index.accounts.find((item) => item.id === accountId);
+  if (!account) {
+    return undefined;
+  }
+
+  account.queuePriority = queuePriority;
+  return account;
+}
+
+export function setAccountTokenRefreshEnabled(
+  index: CodexAccountsIndex,
+  accountId: string,
+  enabled: boolean,
+  now: number
+): CodexAccountRecord | undefined {
+  const account = index.accounts.find((item) => item.id === accountId);
+  if (!account) {
+    return undefined;
+  }
+
+  account.tokenRefreshEnabled = enabled;
+  account.updatedAt = now;
+  return account;
 }
 
 export function removeAccountFromIndex(index: CodexAccountsIndex, accountId: string): boolean {

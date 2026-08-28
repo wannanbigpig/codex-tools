@@ -12,6 +12,7 @@ export type AppState = {
   settingsOpen: boolean;
   privacyMode: boolean;
   lastEnabledAutoRefreshMinutes: number;
+  lastEnabledAutoRefreshCurrentMinutes: number;
   now: number;
   selectedAccountIds: string[];
   pendingActions: PendingActionRequest[];
@@ -33,6 +34,7 @@ export function createInitialState(): AppState {
     settingsOpen: false,
     privacyMode: false,
     lastEnabledAutoRefreshMinutes: 15,
+    lastEnabledAutoRefreshCurrentMinutes: 1,
     now: Date.now(),
     selectedAccountIds: [],
     pendingActions: []
@@ -52,7 +54,11 @@ export function reducer(state: AppState, action: AppAction): AppState {
         lastEnabledAutoRefreshMinutes:
           action.snapshot.settings.autoRefreshMinutes > 0
             ? action.snapshot.settings.autoRefreshMinutes
-            : state.lastEnabledAutoRefreshMinutes
+            : state.lastEnabledAutoRefreshMinutes,
+        lastEnabledAutoRefreshCurrentMinutes:
+          action.snapshot.settings.autoRefreshCurrentMinutes > 0
+            ? action.snapshot.settings.autoRefreshCurrentMinutes
+            : state.lastEnabledAutoRefreshCurrentMinutes
       };
     }
     case "toggle-select":
@@ -94,7 +100,11 @@ export function reducer(state: AppState, action: AppAction): AppState {
         lastEnabledAutoRefreshMinutes:
           typeof action.patch.autoRefreshMinutes === "number" && action.patch.autoRefreshMinutes > 0
             ? action.patch.autoRefreshMinutes
-            : state.lastEnabledAutoRefreshMinutes
+            : state.lastEnabledAutoRefreshMinutes,
+        lastEnabledAutoRefreshCurrentMinutes:
+          typeof action.patch.autoRefreshCurrentMinutes === "number" && action.patch.autoRefreshCurrentMinutes > 0
+            ? action.patch.autoRefreshCurrentMinutes
+            : state.lastEnabledAutoRefreshCurrentMinutes
       };
     case "tick":
       return {

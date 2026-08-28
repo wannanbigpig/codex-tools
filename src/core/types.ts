@@ -141,6 +141,10 @@ export interface CodexAccountRecord {
   id: string;
   /** 登录时间戳 (毫秒) */
   loginAt?: number;
+  /** 最近一次开始使用此账号的时间戳 (毫秒) */
+  sessionStartedAt?: number;
+  /** 已完成会话的累计使用时长（毫秒）；当前运行会话在展示时动态加入 */
+  totalUsageMs?: number;
   /** 用户邮箱 */
   email: string;
   /** 认证模式 */
@@ -173,6 +177,12 @@ export interface CodexAccountRecord {
   accountStructure?: string;
   /** 是否为当前激活账号 */
   isActive: boolean;
+  /** Whether this PC may use the account for automation. PC-local and never synchronized; manual actions remain available. */
+  enabled?: boolean;
+  /** Whether this PC prioritizes the account in its automatic queue. PC-local and never synchronized. */
+  queuePriority?: boolean;
+  /** Whether this PC may refresh this account's token automatically. Missing values are treated as disabled. */
+  tokenRefreshEnabled?: boolean;
   /** 是否在状态栏显示 */
   showInStatusBar?: boolean;
   /** 忽略中的健康问题键 */
@@ -551,8 +561,24 @@ export interface SharedCodexAccountJson {
     timestamp?: number;
   } | null;
   tags?: string[] | null;
+  /** Legacy input only. Current exports and sync payloads omit this PC-local preference. */
+  queue_priority?: boolean;
+  token_refresh_enabled?: boolean;
   created_at?: number;
   last_used?: number;
+}
+
+/** Manual transfer package containing saved accounts, extension settings, and diagnostics. */
+export interface CodexAccountsBackup {
+  format: "codex-accounts-manager-backup";
+  version: 1;
+  exportedAt: string;
+  accounts: SharedCodexAccountJson[];
+  activeAccountId?: string;
+  /** Configuration values under the codexAccounts section. */
+  settings: Record<string, string | number | boolean>;
+  /** Sanitized network diagnostics captured during this extension run. */
+  logs: string[];
 }
 
 export interface CodexImportPreviewIssue {

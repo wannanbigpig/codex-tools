@@ -9,16 +9,67 @@ import type {
   DashboardClientMessage,
   DashboardHostMessage
 } from "../../domain/dashboard/types";
-import type { CodexAccountRecord } from "../../core/types";
+import type { CodexAccountRecord, CodexAccountsBackup } from "../../core/types";
 import type { DashboardLanguage } from "../../localization/languages";
 import { AccountsRepository } from "../../storage";
 import { AnnouncementService, type AnnouncementOptions } from "../../services/announcements";
 import { runWithConcurrencyLimit } from "../../utils/concurrency";
-import { getCommandCopy, t } from "../../utils";
+import { t } from "../../utils";
+import { appendImportedDebugLogs, getDebugLogSnapshot, showNetworkDebugLogs } from "../../utils/debug";
 import { clearAutoSwitchLock, setAutoSwitchLock } from "../workbench/autoSwitchState";
 import { promptForTags } from "../tagEditor";
 import { parseSharedJsonInput, toFailureMessage, toImportActionPayload } from "./actionUtils";
+import {
+  CrossWindowOperationBusyError,
+  CENTRAL_ACCOUNT_OPERATION_KEY,
+  runCrossWindowExclusive
+} from "../../utils/crossWindowOperations";
+
+const COMMAND_ROUTED_ACTIONS = new Set<DashboardActionName>([
+  "addAccount",
+  "importCurrent",
+  "refreshAll",
+  "configureEncryptedSync",
+  "syncNow",
+  "setEncryptedSyncRegistryOverride",
+  "openDashboard",
+  "openWebDashboard",
+  "setWebDashboardPassword",
+  "reauthorize",
+  "details",
+  "switch",
+  "refresh",
+  "remove",
+  "prepareOAuthSession",
+  // These actions are read-only, window-local, or navigation-only. They must
+  // remain usable while another window owns an account mutation or is already
+  // reloading. Actions that delegate to registered commands rely on the
+  // command's narrower operation lock instead of taking a second one here.
+  "refreshAnnouncements",
+  "shareTokens",
+  "exportBackup",
+  "openNetworkLogs",
+  "exportAuthFile",
+  "copyText",
+  "openExternalUrl",
+  "downloadJsonFile",
+  "previewImportSharedJson",
+  "cancelOAuthSession",
+  "refreshView",
+  "reloadPrompt",
+  "getResetCredits"
+]);
 import type { DashboardOAuthCoordinator } from "./oauthCoordinator";
+import { ExtensionSettingsStore } from "../../infrastructure/config/extensionSettings";
+import { handleDashboardSettingUpdate } from "./settings";
+import { promptWindowReloadForAccount } from "../../application/accounts/switchEffects";
+import { refreshTokens } from "../../auth/oauth";
+import { shouldSuppressDashboardNotifications } from "../../utils/notificationPolicy";
+import {
+  clearTokenAutomationError,
+  markTokenAutomationRefreshFailure,
+  markTokenAutomationRefreshSuccess
+} from "../workbench/tokenAutomationState";
 
 export type DashboardActionContext = {
   context: vscode.ExtensionContext;
@@ -33,6 +84,23 @@ export type DashboardActionContext = {
 
 const CODEX_BATCH_REFRESH_CONCURRENCY = 1;
 const CODEX_BATCH_REFRESH_DELAY_MS = 300;
+const ACCOUNT_REQUIRED_ACTIONS = new Set<DashboardActionName>([
+  "exportAuthFile",
+  "reloadPrompt",
+  "reauthorize",
+  "resyncProfile",
+  "dismissHealthIssue",
+  "details",
+  "switch",
+  "refresh",
+  "remove",
+  "toggleAccountEnabled",
+  "setAccountQueuePriority",
+  "setAccountTokenRefreshEnabled",
+  "refreshToken",
+  "getResetCredits",
+  "consumeResetCredit"
+]);
 
 export async function executeDashboardActionMessage(
   ctx: DashboardActionContext,
@@ -47,12 +115,48 @@ export async function executeDashboardActionMessage(
   let errorMessage: string | undefined;
 
   try {
+    if (ACCOUNT_REQUIRED_ACTIONS.has(message.action) && !message.accountId) {
+      throw new Error("This action requires an account. Refresh the dashboard and try again.");
+    }
     const account = message.accountId ? await ctx.repo.getAccount(message.accountId) : undefined;
-    payload = await runDashboardAction(ctx, message.action, message.payload, account);
+    if (message.accountId && !account) {
+      throw new Error("That account no longer exists. Refresh the dashboard and try again.");
+    }
+    const execute = () => runDashboardAction(ctx, message.action, message.payload, account);
+    const executeAndFlush = async () => {
+      try {
+        return await execute();
+      } finally {
+        if (getDashboardOperationKey(message.action, message.accountId) === CENTRAL_ACCOUNT_OPERATION_KEY) {
+          await ctx.repo.flush?.();
+        }
+      }
+    };
+    if (COMMAND_ROUTED_ACTIONS.has(message.action)) {
+      payload = await execute();
+    } else {
+      const operationKey = getDashboardOperationKey(message.action, message.accountId);
+      const operationLabel = formatDashboardOperationLabel(message.action);
+      const attempts = shouldRetryBusyDashboardAction(message.action) ? 20 : 0;
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          payload = await runCrossWindowExclusive(operationKey, operationLabel, executeAndFlush);
+          break;
+        } catch (error) {
+          if (!(error instanceof CrossWindowOperationBusyError) || attempt >= attempts) throw error;
+          await new Promise<void>((resolve) => setTimeout(resolve, 500));
+        }
+      }
+    }
   } catch (error) {
     status = "failed";
     errorMessage = toFailureMessage(error);
     console.error(`[codexAccounts] dashboard action failed: ${message.action}`, error);
+    if (!shouldSuppressDashboardNotifications() && (message.action === "switch" || message.action === "refreshToken")) {
+      void vscode.window.showErrorMessage(
+        `Unable to ${message.action === "switch" ? "switch account" : "refresh token"}: ${errorMessage}`
+      );
+    }
   }
 
   return {
@@ -60,6 +164,47 @@ export async function executeDashboardActionMessage(
     payload,
     errorMessage
   };
+}
+
+function getDashboardOperationKey(action: DashboardActionName, accountId?: string): string {
+  switch (action) {
+    case "prepareOAuthSession":
+      return CENTRAL_ACCOUNT_OPERATION_KEY;
+    case "startOAuthAutoFlow":
+    case "completeOAuthSession":
+      return CENTRAL_ACCOUNT_OPERATION_KEY;
+    case "cancelOAuthSession":
+      return "oauth:cancel";
+    case "toggleAccountEnabled":
+      return CENTRAL_ACCOUNT_OPERATION_KEY;
+    case "refreshToken":
+      return CENTRAL_ACCOUNT_OPERATION_KEY;
+    case "consumeResetCredit":
+      return CENTRAL_ACCOUNT_OPERATION_KEY;
+    case "restoreFromBackup":
+    case "restoreFromAuthJson":
+    case "importSharedJson":
+    case "updateTags":
+    case "setAutoSwitchLock":
+    case "batchRefresh":
+    case "batchResyncProfile":
+    case "batchRemove":
+    case "resyncProfile":
+    case "dismissHealthIssue":
+    case "setAccountQueuePriority":
+    case "setAccountTokenRefreshEnabled":
+      return CENTRAL_ACCOUNT_OPERATION_KEY;
+    default:
+      return `dashboard:${action}:${accountId ?? "global"}`;
+  }
+}
+
+function formatDashboardOperationLabel(action: DashboardActionName): string {
+  return action.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+}
+
+function shouldRetryBusyDashboardAction(action: DashboardActionName): boolean {
+  return getDashboardOperationKey(action) === CENTRAL_ACCOUNT_OPERATION_KEY;
 }
 
 async function runDashboardAction(
@@ -94,12 +239,64 @@ async function runDashboardAction(
       return undefined;
     case "shareTokens":
       return handleShareTokens(ctx.repo, payload, translate);
+    case "exportBackup":
+      return handleExportBackup(ctx.repo);
+    case "configureEncryptedSync":
+      if ((await vscode.commands.executeCommand<boolean>("codexAccounts.configureEncryptedSync")) !== true) {
+        ctx.schedulePublishState();
+        throw new Error("The sync passphrase was not set. Try again and complete the passphrase prompts.");
+      }
+      ctx.schedulePublishState();
+      return undefined;
+    case "syncNow":
+      if ((await vscode.commands.executeCommand<boolean>("codexAccounts.syncNow")) !== true) {
+        ctx.schedulePublishState();
+        throw new Error(
+          "Encrypted account sync did not complete. Make sure VS Code Settings Sync is active on this PC, then try again."
+        );
+      }
+      ctx.schedulePublishState();
+      return undefined;
+    case "setEncryptedSyncRegistryOverride":
+      if (typeof payload?.enabled !== "boolean") {
+        throw new Error("The rescue override request is invalid.");
+      }
+      if (
+        (await vscode.commands.executeCommand<boolean>(
+          "codexAccounts.setEncryptedSyncRegistryOverride",
+          payload.enabled
+        )) !== true
+      ) {
+        ctx.schedulePublishState();
+        throw new Error(
+          payload.enabled
+            ? "Rescue override was not enabled. Verify the encrypted sync passphrase and try again."
+            : "Rescue override could not be disabled. Try again."
+        );
+      }
+      ctx.schedulePublishState();
+      return undefined;
+    case "openNetworkLogs":
+      showNetworkDebugLogs();
+      return undefined;
+    case "exportAuthFile":
+      return handleExportAuthFile(ctx.repo, account);
     case "restoreFromBackup":
       return handleRestoreFromBackup(ctx.repo, ctx.schedulePublishState, translate);
     case "restoreFromAuthJson":
       return handleRestoreFromAuthJson(ctx.repo, ctx.schedulePublishState, translate);
     case "copyText":
       return handleCopyText(payload);
+    case "openDashboard":
+      await vscode.commands.executeCommand("codexAccounts.showQuotaSummary");
+      return undefined;
+    case "openWebDashboard":
+      await vscode.commands.executeCommand("codexAccounts.openWebDashboard");
+      return undefined;
+    case "setWebDashboardPassword":
+      await vscode.commands.executeCommand("codexAccounts.setWebDashboardPassword");
+      ctx.schedulePublishState();
+      return undefined;
     case "openExternalUrl":
       return handleOpenExternalUrl(payload);
     case "downloadJsonFile":
@@ -109,7 +306,7 @@ async function runDashboardAction(
     case "previewImportSharedJson":
       return handlePreviewImportSharedJson(ctx.repo, payload, translate);
     case "prepareOAuthSession":
-      return ctx.oauth.prepareSession(translate);
+      return ctx.oauth.prepareSession(translate, account?.id);
     case "cancelOAuthSession":
       ctx.oauth.cancelSession(payload?.oauthSessionId);
       return undefined;
@@ -158,7 +355,13 @@ async function runDashboardAction(
       return undefined;
     case "switch":
       if (account) {
-        await vscode.commands.executeCommand("codexAccounts.switchAccount", account);
+        try {
+          await vscode.commands.executeCommand("codexAccounts.switchAccount", account);
+          clearTokenAutomationError(account.id);
+          ctx.schedulePublishState();
+        } catch (error) {
+          throw error;
+        }
       }
       return undefined;
     case "refresh":
@@ -171,17 +374,93 @@ async function runDashboardAction(
         await vscode.commands.executeCommand("codexAccounts.removeAccount", account);
       }
       return undefined;
-    case "toggleStatusBar":
+    case "toggleAccountEnabled":
       if (account) {
-        await vscode.commands.executeCommand("codexAccounts.toggleStatusBarAccount", account);
+        let encryptedSyncEnabled = false;
+        try {
+          await ctx.repo.setAccountEnabled(account.id, account.enabled === false);
+          encryptedSyncEnabled = vscode.workspace
+            .getConfiguration("codexAccounts")
+            .get<boolean>("encryptedSyncEnabled", false);
+          if (encryptedSyncEnabled) {
+            try {
+              if (
+                (await vscode.commands.executeCommand<boolean>("codexAccounts.syncNow", {
+                  announceSuccess: false,
+                  backgroundIfBusy: true
+                })) !== true
+              ) {
+                throw new Error("Account updated. Encrypted sync is ready to retry from Sync Now.");
+              }
+            } catch (error) {
+              // The command normally queues a background retry when another
+              // window owns sync. Keep the already-successful local toggle
+              // successful even if a host/extension bridge rejects the call.
+              if (!(error instanceof CrossWindowOperationBusyError)) throw error;
+            }
+          }
+        } finally {
+          ctx.schedulePublishState();
+        }
+        return undefined;
       }
       return undefined;
+    case "setAccountQueuePriority":
+      if (account) {
+        await ctx.repo.setAccountQueuePriority(account.id, payload?.queuePriority === true);
+        ctx.schedulePublishState();
+      }
+      return undefined;
+    case "setAccountTokenRefreshEnabled":
+      if (account) {
+        await ctx.repo.setAccountTokenRefreshEnabled(account.id, payload?.tokenRefreshEnabled !== false);
+        ctx.schedulePublishState();
+      }
+      return undefined;
+    case "refreshToken":
+      return handleRefreshToken(ctx.repo, account, ctx.schedulePublishState, ctx.resolveLanguage());
     case "getResetCredits":
       return handleGetResetCredits(ctx.repo, account);
     case "consumeResetCredit":
       return handleConsumeResetCredit(ctx.repo, account, ctx.schedulePublishState, ctx.resolveLanguage());
     default:
-      return undefined;
+      throw new Error(`Unsupported dashboard action: ${String(action)}`);
+  }
+}
+
+async function handleRefreshToken(
+  repo: AccountsRepository,
+  account: Awaited<ReturnType<AccountsRepository["getAccount"]>>,
+  schedulePublishState: () => void,
+  lang: DashboardLanguage
+) {
+  if (!account) {
+    throw new Error("Account not found");
+  }
+
+  try {
+    const tokens = await repo.getTokens(account.id);
+    if (!tokens?.refreshToken?.trim()) {
+      throw new Error("No refresh token is available. Reauthorize this account.");
+    }
+
+    const refreshed = await refreshTokens(tokens.refreshToken, tokens.idToken);
+    await repo.updateTokens(account.id, {
+      ...refreshed,
+      accountId: refreshed.accountId ?? account.accountId ?? tokens.accountId
+    });
+    markTokenAutomationRefreshSuccess(account.id);
+    schedulePublishState();
+
+    const zh = lang === "zh" || lang === "zh-hant";
+    void vscode.window.showInformationMessage(
+      zh ? `${account.email} 的令牌已刷新。` : `Token refreshed for ${account.email}.`
+    );
+    return undefined;
+  } catch (error) {
+    markTokenAutomationRefreshFailure(account.id, toFailureMessage(error));
+    schedulePublishState();
+    throw error;
   }
 }
 
@@ -214,6 +493,45 @@ async function handleShareTokens(
     void vscode.window.showErrorMessage(message);
     throw new Error(message);
   }
+}
+
+async function handleExportBackup(repo: AccountsRepository) {
+  const accounts = await repo.listAccounts();
+  const shared = await repo.exportSharedAccounts(accounts.map((account) => account.id));
+  const currentSettings = new ExtensionSettingsStore().getDashboardSettings();
+  const settings = Object.fromEntries(
+    Object.entries(currentSettings).filter(
+      ([key, value]) =>
+        key !== "resolvedCodexAppPath" &&
+        key !== "encryptedSyncEnabled" &&
+        key !== "encryptedSyncRegistryOverrideEnabled" &&
+        ["string", "number", "boolean"].includes(typeof value)
+    )
+  ) as CodexAccountsBackup["settings"];
+  const backup: CodexAccountsBackup = {
+    format: "codex-accounts-manager-backup",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    accounts: shared,
+    activeAccountId: accounts.find((account) => account.isActive)?.id,
+    settings,
+    logs: getDebugLogSnapshot()
+  };
+  return { sharedJson: JSON.stringify(backup, null, 2) };
+}
+
+async function handleExportAuthFile(
+  repo: AccountsRepository,
+  account: Awaited<ReturnType<AccountsRepository["getAccount"]>>
+) {
+  if (!account) {
+    throw new Error("Account not found");
+  }
+  const authJson = await repo.exportAuthFile(account.id);
+  if (!authJson) {
+    throw new Error("Account tokens are unavailable");
+  }
+  return { authJson };
 }
 
 async function handleRestoreFromBackup(
@@ -269,7 +587,7 @@ async function handleRestoreFromAuthJson(
 async function handleCopyText(payload: DashboardActionPayload | undefined) {
   const text = payload?.text ?? "";
   if (!text) {
-    return undefined;
+    throw new Error("There is no text to copy.");
   }
   await vscode.env.clipboard.writeText(text);
   return undefined;
@@ -278,20 +596,36 @@ async function handleCopyText(payload: DashboardActionPayload | undefined) {
 async function handleOpenExternalUrl(payload: DashboardActionPayload | undefined) {
   const url = payload?.url?.trim();
   if (!url) {
-    return undefined;
+    throw new Error("There is no URL to open.");
   }
-  await vscode.env.openExternal(vscode.Uri.parse(url));
+  if (!isSafeExternalUrl(url)) {
+    throw new Error("Only HTTPS links or local HTTP links without embedded credentials can be opened.");
+  }
+  const opened = await vscode.env.openExternal(vscode.Uri.parse(url));
+  if (!opened) {
+    throw new Error("VS Code could not open the requested URL.");
+  }
   return undefined;
 }
 
-async function handleDownloadJsonFile(
-  context: vscode.ExtensionContext,
-  payload: DashboardActionPayload | undefined
-) {
+/** Restrict externally opened links to normal web URLs. */
+export function isSafeExternalUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    const isLocalHttp =
+      parsed.protocol === "http:" &&
+      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]");
+    return (parsed.protocol === "https:" || isLocalHttp) && !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+}
+
+async function handleDownloadJsonFile(context: vscode.ExtensionContext, payload: DashboardActionPayload | undefined) {
   const text = payload?.text ?? "";
   const defaultName = payload?.filename?.trim() ?? "codex-accounts-manager-share.json";
   if (!text) {
-    return undefined;
+    throw new Error("There is no data to save.");
   }
 
   const target = await vscode.window.showSaveDialog({
@@ -302,7 +636,7 @@ async function handleDownloadJsonFile(
     saveLabel: "Save JSON"
   });
   if (!target) {
-    return undefined;
+    return { notice: { level: "info" as const, message: "Download cancelled." } };
   }
 
   await vscode.workspace.fs.writeFile(target, Buffer.from(text, "utf8"));
@@ -327,9 +661,20 @@ async function handleImportSharedJson(
   }
 
   try {
+    const backup = parseAccountsBackup(parsed);
+    const accountInput = backup
+      ? backup.accounts
+      : (parsed as Exclude<ReturnType<typeof parseSharedJsonInput>, CodexAccountsBackup>);
     const result = payload?.recoveryMode
-      ? await repo.restoreAccountsFromSharedJson(parsed)
-      : await repo.importSharedAccountsWithSummary(parsed);
+      ? await repo.restoreAccountsFromSharedJson(accountInput)
+      : await repo.importSharedAccountsWithSummary(accountInput);
+    if (backup) {
+      await applyBackupSettings(backup.settings);
+      appendImportedDebugLogs(backup.logs);
+      if (backup.activeAccountId && (await repo.getAccount(backup.activeAccountId))) {
+        await repo.switchAccount(backup.activeAccountId);
+      }
+    }
     schedulePublishState();
     void vscode.window.showInformationMessage(
       translate(payload?.recoveryMode ? "message.restoreFromSharedSuccess" : "message.importSharedJsonSuccess", {
@@ -338,9 +683,12 @@ async function handleImportSharedJson(
     );
     return toImportActionPayload(result);
   } catch (error) {
-    const message = translate(payload?.recoveryMode ? "message.restoreFromSharedFailed" : "message.importSharedJsonFailed", {
-      message: toFailureMessage(error)
-    });
+    const message = translate(
+      payload?.recoveryMode ? "message.restoreFromSharedFailed" : "message.importSharedJsonFailed",
+      {
+        message: toFailureMessage(error)
+      }
+    );
     void vscode.window.showErrorMessage(message);
     throw new Error(message);
   }
@@ -365,9 +713,87 @@ async function handlePreviewImportSharedJson(
   }
 
   const parsed = parseSharedJsonInput(jsonText, (message) => translate("message.sharedJsonParseFailed", { message }));
+  const backup = parseAccountsBackup(parsed);
   return {
-    importPreview: await repo.previewSharedAccountsImport(parsed)
+    importPreview: await repo.previewSharedAccountsImport(
+      backup ? backup.accounts : (parsed as Exclude<ReturnType<typeof parseSharedJsonInput>, CodexAccountsBackup>)
+    )
   };
+}
+
+export function parseAccountsBackup(value: ReturnType<typeof parseSharedJsonInput>): CodexAccountsBackup | undefined {
+  if (!value || Array.isArray(value) || typeof value !== "object") {
+    return undefined;
+  }
+  const candidate = value as Partial<CodexAccountsBackup>;
+  if (candidate.format !== "codex-accounts-manager-backup") {
+    return undefined;
+  }
+  if (
+    candidate.version !== 1 ||
+    typeof candidate.exportedAt !== "string" ||
+    Number.isNaN(Date.parse(candidate.exportedAt)) ||
+    !Array.isArray(candidate.accounts) ||
+    (candidate.activeAccountId !== undefined &&
+      (typeof candidate.activeAccountId !== "string" || candidate.activeAccountId.length > 4096)) ||
+    !candidate.settings ||
+    typeof candidate.settings !== "object" ||
+    Array.isArray(candidate.settings) ||
+    Object.values(candidate.settings).some((setting) => !["string", "number", "boolean"].includes(typeof setting)) ||
+    !Array.isArray(candidate.logs) ||
+    candidate.logs.some((line) => typeof line !== "string")
+  ) {
+    throw new Error("The Codex Accounts backup file is invalid or unsupported.");
+  }
+  return candidate as CodexAccountsBackup;
+}
+
+async function applyBackupSettings(settings: Record<string, unknown>): Promise<void> {
+  const supported = new Set([
+    "dashboardTheme",
+    "codexAppRestartEnabled",
+    "codexAppRestartMode",
+    "backgroundTokenRefreshEnabled",
+    "autoResumeCodexSessions",
+    "autoRefreshMinutes",
+    "autoRefreshCurrentMinutes",
+    "usageHistoryRetentionDays",
+    "autoSwitchEnabled",
+    "hourlyQuotaControlEnabled",
+    "autoSwitchReloadWindowEnabled",
+    "autoSwitchHourlyThreshold",
+    "autoSwitchWeeklyThreshold",
+    "autoSwitchLockMinutes",
+    "quotaWarningEnabled",
+    "quotaWarningThreshold",
+    "quotaGreenThreshold",
+    "quotaYellowThreshold",
+    "debugNetwork",
+    "displayLanguage",
+    "codexAppPath"
+  ]);
+  for (const [key, value] of Object.entries(settings)) {
+    if (!supported.has(key) || !["string", "number", "boolean"].includes(typeof value)) {
+      continue;
+    }
+    if (key === "codexAppPath" && typeof value === "string" && value && !(await pathExists(value))) {
+      continue;
+    }
+    await handleDashboardSettingUpdate(
+      key as Parameters<typeof handleDashboardSettingUpdate>[0],
+      value as string | number | boolean,
+      vscode.ConfigurationTarget.Global
+    );
+  }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function handleUpdateTags(
@@ -383,7 +809,7 @@ async function handleUpdateTags(
     return undefined;
   }
   const dashboardCopy = getDashboardCopy(resolveLanguage());
-  const targetAccount = targetIds.length === 1 ? account ?? (await repo.getAccount(targetIds[0]!)) : undefined;
+  const targetAccount = targetIds.length === 1 ? (account ?? (await repo.getAccount(targetIds[0]!))) : undefined;
   const mode = payload?.mode === "add" || payload?.mode === "remove" ? payload.mode : "set";
   const tags = await promptForTags({
     copy: dashboardCopy,
@@ -445,8 +871,11 @@ async function handleBatchRefresh(
   payload: DashboardActionPayload | undefined,
   translate: ReturnType<typeof t>
 ) {
-  const targetIds = payload?.accountIds ?? [];
-  const accountsById = new Map(await Promise.all(targetIds.map(async (id) => [id, await repo.getAccount(id)] as const)));
+  const requestedIds = payload?.accountIds ?? [];
+  const accountsById = new Map(
+    await Promise.all(requestedIds.map(async (id) => [id, await repo.getAccount(id)] as const))
+  );
+  const targetIds = requestedIds;
   let success = 0;
   let failed = 0;
   const failures: DashboardBatchResultFailure[] = [];
@@ -455,12 +884,14 @@ async function handleBatchRefresh(
     CODEX_BATCH_REFRESH_CONCURRENCY,
     async (id) => {
       try {
-        await refreshSingleQuota(repo, { refresh() {} }, id, {
-          announce: false,
-          forceRefresh: true,
-          refreshView: false,
-          warnQuota: false
-        });
+        await runCrossWindowExclusive(`quota:refresh:${id}`, "Quota refresh", () =>
+          refreshSingleQuota(repo, { refresh() {} }, id, {
+            announce: false,
+            forceRefresh: true,
+            refreshView: false,
+            warnQuota: false
+          })
+        );
         success += 1;
       } catch (error) {
         failed += 1;
@@ -501,24 +932,31 @@ async function handleBatchResync(
   translate: ReturnType<typeof t>
 ) {
   const targetIds = payload?.accountIds ?? [];
-  const accountsById = new Map(await Promise.all(targetIds.map(async (id) => [id, await repo.getAccount(id)] as const)));
+  const accountsById = new Map(
+    await Promise.all(targetIds.map(async (id) => [id, await repo.getAccount(id)] as const))
+  );
   let success = 0;
   let failed = 0;
   const failures: DashboardBatchResultFailure[] = [];
-  await runWithConcurrencyLimit(targetIds, 4, async (id) => {
-    try {
-      await resyncAccountInfo(repo, id);
-      success += 1;
-    } catch (error) {
-      failed += 1;
-      failures.push({
-        accountId: id,
-        email: accountsById.get(id)?.email,
-        message: toFailureMessage(error)
-      });
-      console.warn(`[codexAccounts] batch profile resync failed for ${id}:`, error);
-    }
-  }, { delayMs: CODEX_BATCH_REFRESH_DELAY_MS });
+  await runWithConcurrencyLimit(
+    targetIds,
+    4,
+    async (id) => {
+      try {
+        await resyncAccountInfo(repo, id);
+        success += 1;
+      } catch (error) {
+        failed += 1;
+        failures.push({
+          accountId: id,
+          email: accountsById.get(id)?.email,
+          message: toFailureMessage(error)
+        });
+        console.warn(`[codexAccounts] batch profile resync failed for ${id}:`, error);
+      }
+    },
+    { delayMs: CODEX_BATCH_REFRESH_DELAY_MS }
+  );
   schedulePublishState();
   const message = translate("message.batchResyncSummary", {
     success,
@@ -560,7 +998,9 @@ async function handleBatchRemove(
   if (!targetIds.length) {
     return undefined;
   }
-  const accountsById = new Map(await Promise.all(targetIds.map(async (id) => [id, await repo.getAccount(id)] as const)));
+  const accountsById = new Map(
+    await Promise.all(targetIds.map(async (id) => [id, await repo.getAccount(id)] as const))
+  );
   const choice = await vscode.window.showWarningMessage(
     translate("message.batchRemoveConfirm", { count: targetIds.length }),
     { modal: true },
@@ -608,15 +1048,7 @@ async function handleBatchRemove(
 
 async function handleReloadPrompt(account: CodexAccountRecord | undefined) {
   if (account) {
-    const copy = getCommandCopy();
-    const choice = await vscode.window.showInformationMessage(
-      copy.switchedAndAskReload(account.email),
-      copy.reloadNow,
-      copy.later
-    );
-    if (choice === copy.reloadNow) {
-      await vscode.commands.executeCommand("workbench.action.reloadWindow");
-    }
+    await promptWindowReloadForAccount(account);
   }
   return undefined;
 }
@@ -662,11 +1094,7 @@ async function handleConsumeResetCredit(
     : `Reset your rate limit and keep working without interruption. You have ${available} reset(s) available.`;
   const confirmBtn = isZh ? "重置速率限制" : "Reset Rate Limit";
 
-  const choice = await vscode.window.showWarningMessage(
-    `${title}\n\n${body}`,
-    { modal: true },
-    confirmBtn
-  );
+  const choice = await vscode.window.showWarningMessage(`${title}\n\n${body}`, { modal: true }, confirmBtn);
   if (choice !== confirmBtn) {
     return undefined;
   }

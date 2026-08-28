@@ -55,12 +55,14 @@ export function SettingsThemeBlock(props: {
   const copy = zh
     ? {
         title: "主题",
+        sub: "选择仪表板的显示主题。",
         dark: "深色",
         light: "浅色",
         auto: "跟随 VS Code"
       }
     : {
         title: "Theme",
+        sub: "Choose the dashboard appearance.",
         dark: "Dark",
         light: "Light",
         auto: "Follow VS Code"
@@ -73,20 +75,21 @@ export function SettingsThemeBlock(props: {
 
   return (
     <div class="settings-block settings-theme-block">
-      <div class="settings-theme-row">
+      <div class="settings-block-head">
         <div class="settings-block-title">{copy.title}</div>
-        <div class="settings-theme-options">
-          {options.map((option) => (
-            <button
-              key={option.value}
-              class={`settings-theme-option ${props.settings.dashboardTheme === option.value ? "active" : ""}`}
-              type="button"
-              onClick={() => props.onChange(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <div class="settings-block-sub">{copy.sub}</div>
+      </div>
+      <div class="settings-theme-options" role="group" aria-label={copy.title}>
+        {options.map((option) => (
+          <button
+            key={option.value}
+            class={`settings-theme-option ${props.settings.dashboardTheme === option.value ? "active" : ""}`}
+            type="button"
+            onClick={() => props.onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -96,6 +99,7 @@ export function SettingsSegmentBlock(props: {
   title: string;
   sub: string;
   note?: string;
+  className?: string;
   options: Array<{
     key: string;
     title: string;
@@ -106,14 +110,19 @@ export function SettingsSegmentBlock(props: {
   children?: ComponentChildren;
 }) {
   return (
-    <div class="settings-block">
+    <div class={`settings-block ${props.className ?? ""}`}>
       <div class="settings-block-head">
         <div class="settings-block-title">{props.title}</div>
         <div class="settings-block-sub">{props.sub}</div>
       </div>
       <div class="settings-segment">
         {props.options.map((option) => (
-          <button key={option.key} class={`segment-btn ${option.active ? "active" : ""}`} type="button" onClick={option.onClick}>
+          <button
+            key={option.key}
+            class={`segment-btn ${option.active ? "active" : ""}`}
+            type="button"
+            onClick={option.onClick}
+          >
             <span class="segment-title">{option.title}</span>
             <span class="segment-copy">{option.description}</span>
           </button>
@@ -127,19 +136,27 @@ export function SettingsSegmentBlock(props: {
 
 export function SettingsToggleBlock(props: {
   title: string;
-  sub: string;
+  sub: ComponentChildren;
   enabled: boolean;
   onToggle: (enabled: boolean) => void;
+  disabled?: boolean;
+  className?: string;
   children?: ComponentChildren;
 }) {
   return (
-    <div class="settings-block">
+    <div class={`settings-block ${props.className ?? ""}`}>
       <div class="settings-toggle-head">
         <div class="settings-block-head">
           <div class="settings-block-title">{props.title}</div>
           <div class="settings-block-sub">{props.sub}</div>
         </div>
-        <button class={`settings-inline-toggle ${props.enabled ? "active" : ""}`} type="button" aria-pressed={props.enabled} onClick={() => props.onToggle(!props.enabled)}>
+        <button
+          class={`settings-inline-toggle ${props.enabled ? "active" : ""}`}
+          type="button"
+          aria-pressed={props.enabled}
+          disabled={props.disabled}
+          onClick={() => props.onToggle(!props.enabled)}
+        >
           <span class="settings-inline-toggle-track">
             <span class="settings-inline-toggle-thumb"></span>
           </span>
@@ -162,7 +179,12 @@ export function SettingsPreferenceRow(props: {
         <div class="settings-block-title">{props.title}</div>
         <div class="settings-block-sub">{props.sub}</div>
       </div>
-      <button class={`settings-inline-toggle ${props.enabled ? "active" : ""}`} type="button" aria-pressed={props.enabled} onClick={() => props.onToggle(!props.enabled)}>
+      <button
+        class={`settings-inline-toggle ${props.enabled ? "active" : ""}`}
+        type="button"
+        aria-pressed={props.enabled}
+        onClick={() => props.onToggle(!props.enabled)}
+      >
         <span class="settings-inline-toggle-track">
           <span class="settings-inline-toggle-thumb"></span>
         </span>
@@ -217,7 +239,7 @@ export function SettingsThresholdBlock(props: {
   const fillGreenStyle = { left: `${green}%`, width: `${Math.max(0, 100 - green)}%` } as Record<string, string>;
 
   return (
-    <div class="settings-block">
+    <div class="settings-block settings-block-wide settings-threshold-block">
       <div class="settings-block-head">
         <div class="settings-block-title">{props.copy.colorThresholdTitle}</div>
         <div class="settings-block-sub">{props.copy.colorThresholdSub}</div>
@@ -243,8 +265,26 @@ export function SettingsThresholdBlock(props: {
           <div class="threshold-range-fill threshold-range-fill-red" style={fillRedStyle}></div>
           <div class="threshold-range-fill threshold-range-fill-yellow" style={fillYellowStyle}></div>
           <div class="threshold-range-fill threshold-range-fill-green" style={fillGreenStyle}></div>
-          <input class="threshold-range threshold-range-yellow" type="range" min="0" max="100" step="1" value={yellow} onInput={(event) => props.onPreview("yellow", Number(event.currentTarget.value))} onChange={(event) => props.onCommit("yellow", Number(event.currentTarget.value))} />
-          <input class="threshold-range threshold-range-green" type="range" min="0" max="100" step="1" value={green} onInput={(event) => props.onPreview("green", Number(event.currentTarget.value))} onChange={(event) => props.onCommit("green", Number(event.currentTarget.value))} />
+          <input
+            class="threshold-range threshold-range-yellow"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={yellow}
+            onInput={(event) => props.onPreview("yellow", Number(event.currentTarget.value))}
+            onChange={(event) => props.onCommit("yellow", Number(event.currentTarget.value))}
+          />
+          <input
+            class="threshold-range threshold-range-green"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={green}
+            onInput={(event) => props.onPreview("green", Number(event.currentTarget.value))}
+            onChange={(event) => props.onCommit("green", Number(event.currentTarget.value))}
+          />
         </div>
         <div class="threshold-slider-scale">
           <span>0%</span>
@@ -303,20 +343,22 @@ export function SettingsDiscreteSlider(props: {
         />
       </div>
       <div class="step-slider-scale">
-        {(props.scaleValues ?? (props.sparseScale ? pickSparseScaleValues(props.values) : props.values)).map((value, index, scaleValues) => {
-          const markerPercent = resolveDiscretePercent(props.values, value);
-          const labelStyle = { left: `${markerPercent}%` } as Record<string, string>;
+        {(props.scaleValues ?? (props.sparseScale ? pickSparseScaleValues(props.values) : props.values)).map(
+          (value, index, scaleValues) => {
+            const markerPercent = resolveDiscretePercent(props.values, value);
+            const labelStyle = { left: `${markerPercent}%` } as Record<string, string>;
 
-          return (
-            <span
-              key={value}
-              class={`step-slider-scale-label ${index === 0 ? "is-start" : index === scaleValues.length - 1 ? "is-end" : ""}`}
-              style={labelStyle}
-            >
-              {props.valueLabel(value)}
-            </span>
-          );
-        })}
+            return (
+              <span
+                key={value}
+                class={`step-slider-scale-label ${index === 0 ? "is-start" : index === scaleValues.length - 1 ? "is-end" : ""}`}
+                style={labelStyle}
+              >
+                {props.valueLabel(value)}
+              </span>
+            );
+          }
+        )}
       </div>
     </div>
   );

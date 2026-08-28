@@ -1,3 +1,20 @@
+export function DropdownChevronIcon(props: { open: boolean }) {
+  return (
+    <span class={`dropdown-chevron ${props.open ? "open" : ""}`} aria-hidden="true">
+      <svg viewBox="0 0 16 16">
+        <path
+          d="m3.5 6 4.5 4 4.5-4"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </svg>
+    </span>
+  );
+}
+
 export function renderSwitchIcon() {
   return (
     <svg viewBox="0 0 1024 1024" aria-hidden="true">
@@ -81,7 +98,25 @@ export function renderReloadIcon() {
   );
 }
 
+export function AccountAccessIcon() {
+  return (
+    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="10" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7" />
+      <path
+        d="M4.5 19.5v-1.2c0-2.7 2.4-4.8 5.5-4.8 1.2 0 2.3.3 3.2.9"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+      />
+      <path d="M17.5 12.5v6m-3-3h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+    </svg>
+  );
+}
+
 export function renderReauthorizeIcon() {
+  // The filled shield/key glyph reads as credential repair at card size and
+  // takes the attention color more clearly than the generic add-account icon.
   return (
     <svg viewBox="0 0 1024 1024" aria-hidden="true">
       <path
@@ -293,12 +328,45 @@ export function ImportIcon() {
   );
 }
 
-export function renderResetCreditsIcon() {
+export function ResetCreditIcon() {
   return (
-    <svg viewBox="0 0 1024 1024" aria-hidden="true" width="16" height="16">
-      <path d="M504.366545 1023.767273A465.314909 465.314909 0 0 1 67.863273 396.474182l43.752727 16.290909A418.816 418.816 0 1 0 504.366545 139.636364V93.090909c256.977455 0 465.314909 208.337455 465.31491 465.314909 0 257.024-208.337455 465.361455-465.31491 465.361455z" fill="currentColor" />
-      <path d="M389.259636 115.898182l116.829091 116.363636V0h-0.930909z" fill="currentColor" />
-      <path d="M504.226909 558.545455m-139.636364 0a139.636364 139.636364 0 1 0 279.272728 0 139.636364 139.636364 0 1 0-279.272728 0Z" fill="currentColor" />
+    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M19 8a8 8 0 1 0 .4 7"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      />
+      <path
+        d="M19 3v5h-5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path d="M12 8v4l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+export function GridViewIcon() {
+  return (
+    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.7" />
+      <rect x="13.5" y="3.5" width="7" height="7" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.7" />
+      <rect x="3.5" y="13.5" width="7" height="7" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.7" />
+      <rect x="13.5" y="13.5" width="7" height="7" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.7" />
+    </svg>
+  );
+}
+
+export function TableViewIcon() {
+  return (
+    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.7" />
+      <path d="M3 9h18M3 14.5h18M8 4v16" fill="none" stroke="currentColor" stroke-width="1.7" />
     </svg>
   );
 }

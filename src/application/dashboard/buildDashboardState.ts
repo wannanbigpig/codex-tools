@@ -1,15 +1,33 @@
-import { DashboardAccountViewModel, DashboardMetricViewModel, DashboardState } from "../../domain/dashboard/types";
+import {
+  DashboardAccountViewModel,
+  DashboardCopy,
+  DashboardMetricViewModel,
+  DashboardState
+} from "../../domain/dashboard/types";
+import { parseCreditsOrderValue } from "../../domain/autoQueueOrder";
 import { AccountsRepository } from "../../storage";
 import { ExtensionSettingsStore } from "../../infrastructure/config/extensionSettings";
 import { formatAccountStructure, formatAuthProvider, formatPlanType, getDashboardCopy } from "./copy";
 import { CodexAccountRecord, CodexCreditsSummary, CodexTokens, type CodexAnnouncementState } from "../../core/types";
 import { resolveCodexAppLaunchPath } from "../../utils/codexApp";
-import { getCurrentWindowRuntimeAccountId } from "../../presentation/workbench/windowRuntimeAccount";
+import {
+  getCurrentWindowRuntimeAccountId,
+  getQueuedAccountSwitch
+} from "../../presentation/workbench/windowRuntimeAccount";
 import { getQuotaIssueKind } from "../../utils/quotaIssue";
 import { getTokenAutomationSnapshot } from "../../presentation/workbench/tokenAutomationState";
 import { getAutoSwitchRuntimeSnapshot } from "../../presentation/workbench/autoSwitchState";
 import { getAccountAutomationState, isHealthDismissed, resolveAccountHealth } from "../accounts/health";
-import { isFreePlanType, resolveLongQuotaLabel } from "../../utils/quotaLabels";
+import { isFreePlanType, isMonthlyQuotaWindow, resolveLongQuotaLabel } from "../../utils/quotaLabels";
+import { parseSubscriptionExpiryMs } from "../../utils/subscriptionExpiry";
+import {
+  doesEncryptedSyncNeedConfiguration,
+  doesEncryptedSyncNeedSettingsSync,
+  getEncryptedSyncStatus,
+  getPendingEnablementAccountIds,
+  getSyncedAccountLeases,
+  isEncryptedSyncRegistryOverrideEnabled
+} from "../../services/encryptedSync";
 
 export async function buildDashboardState(
   repo: AccountsRepository,
@@ -21,14 +39,20 @@ export async function buildDashboardState(
   const baseSettings = settingsStore.getDashboardSettings();
   const settings = {
     ...baseSettings,
+    encryptedSyncRegistryOverrideEnabled: isEncryptedSyncRegistryOverrideEnabled(),
     resolvedCodexAppPath: (await resolveCodexAppLaunchPath(baseSettings.codexAppPath)) ?? ""
   };
   const copy = getDashboardCopy(lang);
+  const encryptedSyncStatus = getEncryptedSyncStatus();
   const currentWindowAccountId = getCurrentWindowRuntimeAccountId();
   const tokenAutomation = getTokenAutomationSnapshot();
   const autoSwitchRuntime = getAutoSwitchRuntimeSnapshot();
   const indexHealth = await repo.getIndexHealthSummary();
   const accounts = await repo.listAccounts();
+  const activeAccount = accounts.find((account) => account.isActive);
+  const queuedSwitch = resolveDashboardQueuedSwitch(accounts, getQueuedAccountSwitch());
+  const leasesByAccountId = new Map(getSyncedAccountLeases().map((lease) => [lease.accountId, lease]));
+  const pendingEnablementAccountIds = new Set(getPendingEnablementAccountIds());
   const tokenEntries = await Promise.all(
     accounts.map(async (account) => [account.id, await repo.getTokens(account.id, { syncExternal: false })] as const)
   );
@@ -58,6 +82,11 @@ export async function buildDashboardState(
     brandSub: copy.brandSub,
     logoUri,
     settings,
+    encryptedSyncNeedsConfiguration: doesEncryptedSyncNeedConfiguration(),
+    encryptedSyncNeedsSettingsSync: doesEncryptedSyncNeedSettingsSync(),
+    encryptedSyncLastCompletedAt: encryptedSyncStatus.lastCompletedAt,
+    encryptedSyncSessionCount: encryptedSyncStatus.sessionCount,
+    encryptedSyncEnabledSessionCount: encryptedSyncStatus.enabledSessionCount,
     copy,
     tokenAutomation: {
       enabled: settings.backgroundTokenRefreshEnabled,
@@ -68,6 +97,7 @@ export async function buildDashboardState(
     },
     announcements,
     indexHealth,
+    terminalNotice: resolveTerminalNotice(autoSwitchRuntime.dashboardNotice, activeAccount, copy),
     accounts: sortedAccounts.map((account) =>
       mapAccount(
         account,
@@ -76,10 +106,53 @@ export async function buildDashboardState(
         lang,
         copy,
         currentWindowAccountId,
-        autoSwitchRuntime
+        autoSwitchRuntime,
+        leasesByAccountId.get(account.id),
+        queuedSwitch,
+        pendingEnablementAccountIds.has(account.id)
       )
     )
   };
+}
+
+function resolveTerminalNotice(
+  notice: ReturnType<typeof getAutoSwitchRuntimeSnapshot>["dashboardNotice"],
+  activeAccount: CodexAccountRecord | undefined,
+  copy: DashboardCopy
+): DashboardState["terminalNotice"] {
+  if (!notice) {
+    return undefined;
+  }
+  if (notice.accountId && activeAccount && notice.accountId !== activeAccount.id) {
+    return undefined;
+  }
+  if (!notice.switchResult || !activeAccount) {
+    return notice;
+  }
+
+  const template =
+    notice.switchResult === "switched-and-reloaded"
+      ? copy.autoSwitchToastSwitchedAndReloaded
+      : copy.autoSwitchToastSwitched;
+  return {
+    level: notice.level,
+    message: template.replace("{account}", activeAccount.email),
+    createdAt: notice.createdAt
+  };
+}
+
+export function resolveDashboardQueuedSwitch(
+  accounts: readonly Pick<CodexAccountRecord, "id">[],
+  queuedSwitch: ReturnType<typeof getQueuedAccountSwitch>
+): ReturnType<typeof getQueuedAccountSwitch> {
+  if (!queuedSwitch?.fromAccountId || queuedSwitch.fromAccountId === queuedSwitch.toAccountId) {
+    return undefined;
+  }
+
+  const accountIds = new Set(accounts.map((account) => account.id));
+  return accountIds.has(queuedSwitch.fromAccountId) && accountIds.has(queuedSwitch.toAccountId)
+    ? queuedSwitch
+    : undefined;
 }
 
 export function sortDashboardAccounts<T extends Pick<CodexAccountRecord, "id" | "isActive" | "createdAt" | "email">>(
@@ -91,8 +164,7 @@ export function sortDashboardAccounts<T extends Pick<CodexAccountRecord, "id" | 
     (a, b) =>
       Number(b.id === currentWindowAccountId) - Number(a.id === currentWindowAccountId) ||
       Number(b.isActive) - Number(a.isActive) ||
-      (accountViewStateById?.get(b.id)?.healthPriority ?? 0) -
-        (accountViewStateById?.get(a.id)?.healthPriority ?? 0) ||
+      (accountViewStateById?.get(b.id)?.healthPriority ?? 0) - (accountViewStateById?.get(a.id)?.healthPriority ?? 0) ||
       b.createdAt - a.createdAt ||
       a.email.localeCompare(b.email)
   );
@@ -106,19 +178,30 @@ function mapAccount(
         health: ReturnType<typeof resolveAccountHealth>;
         dismissedHealth: boolean;
         automationState: ReturnType<typeof getAccountAutomationState>;
-    }
+      }
     | undefined,
   extraSelectedCount: number,
   lang: DashboardState["lang"],
   copy: DashboardState["copy"],
   currentWindowAccountId?: string,
-  autoSwitchRuntime?: ReturnType<typeof getAutoSwitchRuntimeSnapshot>
+  autoSwitchRuntime?: ReturnType<typeof getAutoSwitchRuntimeSnapshot>,
+  accountLease?: ReturnType<typeof getSyncedAccountLeases>[number],
+  queuedSwitch?: ReturnType<typeof getQueuedAccountSwitch>,
+  enablementSyncPending = false
 ): DashboardAccountViewModel {
   const canToggleStatusBar = account.isActive ? false : Boolean(account.showInStatusBar) || extraSelectedCount < 2;
   const health = viewState?.health ?? resolveAccountHealth(account, viewState?.tokens, getTokenAutomationSnapshot());
   const dismissedHealth = viewState?.dismissedHealth ?? isHealthDismissed(account, health);
   const automationState = viewState?.automationState;
+  const switchQueued = queuedSwitch?.toAccountId === account.id;
+  const displayedIsActive = switchQueued
+    ? false
+    : queuedSwitch?.fromAccountId === account.id
+      ? true
+      : account.isActive;
   const subscription = resolveSubscriptionDisplay(account, viewState?.tokens, copy, lang);
+  const subscriptionExpiresAt = readSubscriptionTimestampMs(account, viewState?.tokens);
+  const creditsOrderValue = parseCreditsOrderValue(account.quotaSummary?.credits);
   const resetCreditsAvailable = account.quotaSummary?.resetCreditsAvailable;
   const resetCreditsNextExpiresAt = account.quotaSummary?.resetCreditsNextExpiresAt;
   if ((resetCreditsAvailable ?? 0) > 0 && resetCreditsNextExpiresAt == null) {
@@ -146,16 +229,31 @@ function mapAccount(
     subscriptionText: subscription.text,
     subscriptionTitle: subscription.title,
     subscriptionColor: subscription.color,
+    subscriptionExpiresAt,
     addMethodLabel: `${formatAddMethod(account.addedVia, lang)} | ${formatAuthProvider(account.authProvider, lang)}`,
     addedAtLabel: formatAddedAt(account.createdAt, copy.never),
-    statusColor: account.isActive ? "var(--accent-green)" : health.kind === "healthy" ? undefined : "#ef4444",
+    loginAt: account.loginAt,
+    sessionStartedAt: account.sessionStartedAt,
+    totalUsageMs: account.totalUsageMs,
+    runningDeviceName: accountLease?.deviceName,
+    runningOnThisDevice: accountLease?.isCurrentDevice,
+    enablementSyncPending,
+    statusColor: displayedIsActive ? "var(--accent-green)" : health.kind === "healthy" ? undefined : "#ef4444",
     planTypeLabel: formatPlanTypeWithQuota(account, lang),
     creditsText: formatCreditsText(account.quotaSummary?.credits, lang),
+    creditsBalance:
+      creditsOrderValue !== undefined && Number.isFinite(creditsOrderValue) ? creditsOrderValue : undefined,
+    creditsUnlimited: creditsOrderValue === Number.POSITIVE_INFINITY,
     userId: account.userId,
     accountId: account.accountId,
     organizationId: account.organizationId,
-    isActive: account.isActive,
+    isActive: displayedIsActive,
     isCurrentWindowAccount: account.id === currentWindowAccountId,
+    enabled: account.enabled !== false,
+    queuePriority: account.queuePriority === true,
+    tokenRefreshEnabled: account.tokenRefreshEnabled === true,
+    canRefreshToken: Boolean(viewState?.tokens?.refreshToken?.trim()),
+    switchQueued,
     showInStatusBar: Boolean(account.showInStatusBar),
     canToggleStatusBar,
     statusToggleTitle: canToggleStatusBar
@@ -175,7 +273,8 @@ function mapAccount(
     lastQuotaAt: account.lastQuotaAt,
     resetCreditsAvailable,
     resetCreditsNextExpiresAt,
-    autoSwitchLockedUntil: autoSwitchRuntime?.lockedAccountId === account.id ? autoSwitchRuntime.lockedUntil : undefined,
+    autoSwitchLockedUntil:
+      autoSwitchRuntime?.lockedAccountId === account.id ? autoSwitchRuntime.lockedUntil : undefined,
     metrics: buildMetrics(account, copy, lang)
   };
 }
@@ -193,6 +292,7 @@ export function buildMetrics(
     metrics.push({
       key: "hourly",
       label: copy.hourlyLabel,
+      period: "hourly",
       percentage: quota?.hourlyPercentage,
       resetAt: quota?.hourlyResetTime,
       requestsLeft: quota?.hourlyRequestsLeft,
@@ -204,6 +304,7 @@ export function buildMetrics(
   metrics.push({
     key: "weekly",
     label: resolveLongQuotaLabel(account.planType, quota?.weeklyWindowMinutes, lang, copy.weeklyLabel),
+    period: isMonthlyQuotaWindow(account.planType, quota?.weeklyWindowMinutes) ? "monthly" : "weekly",
     percentage: quota?.weeklyPercentage,
     resetAt: quota?.weeklyResetTime,
     requestsLeft: quota?.weeklyRequestsLeft,
@@ -216,6 +317,7 @@ export function buildMetrics(
       metrics.push({
         key: `additional-${index}-hourly`,
         label: `${limit.limitName} ${copy.hourlyLabel}`,
+        period: "hourly",
         percentage: limit.hourlyPercentage,
         resetAt: limit.hourlyResetTime,
         requestsLeft: limit.hourlyRequestsLeft,
@@ -227,6 +329,7 @@ export function buildMetrics(
       metrics.push({
         key: `additional-${index}-weekly`,
         label: `${limit.limitName} ${resolveLongQuotaLabel(undefined, limit.weeklyWindowMinutes, lang, copy.weeklyLabel)}`,
+        period: isMonthlyQuotaWindow(undefined, limit.weeklyWindowMinutes) ? "monthly" : "weekly",
         percentage: limit.weeklyPercentage,
         resetAt: limit.weeklyResetTime,
         requestsLeft: limit.weeklyRequestsLeft,
@@ -292,7 +395,8 @@ export function resolveSubscriptionDisplay(
   const dateText = formatSubscriptionDate(new Date(timestampMs));
   const days = Math.max(0, Math.ceil(diffMs / 86_400_000));
   const dayUnit = lang === "zh-hant" || lang === "zh" ? "天" : "d";
-  const text = lang === "zh" || lang === "zh-hant" ? `${dateText}（${days} ${dayUnit}）` : `${dateText} (${days}${dayUnit})`;
+  const text =
+    lang === "zh" || lang === "zh-hant" ? `${dateText}（${days} ${dayUnit}）` : `${dateText} (${days}${dayUnit})`;
   const color = diffMs <= 3 * 86_400_000 ? "#ef4444" : diffMs <= 10 * 86_400_000 ? "#f59e0b" : "var(--accent-green)";
 
   return {
@@ -314,13 +418,7 @@ function readSubscriptionTimestampMs(account: CodexAccountRecord, tokens: CodexT
     return undefined;
   }
 
-  const numeric = Number(raw);
-  if (Number.isFinite(numeric)) {
-    return numeric < 1_000_000_000_000 ? numeric * 1000 : numeric;
-  }
-
-  const parsed = Date.parse(raw);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  return parseSubscriptionExpiryMs(raw);
 }
 
 function formatPlanTypeWithQuota(account: CodexAccountRecord, lang: DashboardState["lang"]): string {
@@ -340,8 +438,15 @@ function formatCreditsText(credits: CodexCreditsSummary | undefined, lang: Dashb
   }
 
   const zh = lang === "zh" || lang === "zh-hant";
-  const value = credits.unlimited ? (zh ? "无限" : "Unlimited") : credits.balance || (credits.hasCredits ? (zh ? "可用" : "Available") : "0");
-  const label = zh ? "剩余额度" : "Credits left";
+  const numericBalance = Number(credits.balance.replace(/[^0-9.-]/g, ""));
+  if (
+    !credits.unlimited &&
+    (!credits.hasCredits || (credits.balance.trim() && Number.isFinite(numericBalance) && numericBalance <= 0))
+  ) {
+    return undefined;
+  }
+  const value = credits.unlimited ? (zh ? "无限" : "Unlimited") : credits.balance || (zh ? "可用" : "Available");
+  const label = zh ? "额度" : "Credit";
   return `${label}: ${value}`;
 }
 
@@ -432,7 +537,17 @@ function normalizeSubscriptionValue(value: unknown): string | undefined {
   }
   if (typeof value === "object" && !Array.isArray(value)) {
     const record = value as Record<string, unknown>;
-    for (const key of ["value", "timestamp", "ts", "seconds", "sec", "unix", "epoch", "epoch_seconds", "epochSeconds"]) {
+    for (const key of [
+      "value",
+      "timestamp",
+      "ts",
+      "seconds",
+      "sec",
+      "unix",
+      "epoch",
+      "epoch_seconds",
+      "epochSeconds"
+    ]) {
       const normalized = normalizeSubscriptionValue(record[key]);
       if (normalized) {
         return normalized;

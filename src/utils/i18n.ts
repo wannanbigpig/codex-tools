@@ -172,6 +172,11 @@ export type TranslationKey =
   | "quotaWarning.message"
   | "quotaWarning.dismiss"
   | "quotaWarning.switchNow"
+  | "quotaWarning.switchAccount"
+  | "quotaWarning.resetAccount"
+  | "quotaWarning.selectAccount"
+  | "quotaWarning.autoSelect"
+  | "quotaWarning.later"
   // Status Toggle
   | "statusToggle.alwaysShown"
   | "statusToggle.added"
@@ -389,8 +394,11 @@ export function getQuotaWarningCopy(): {
   weeklyLabel: string;
   reviewLabel: string;
   message: (account: string, quota: string, value: number, threshold: number) => string;
-  dismiss: string;
-  switchNow: string;
+  switchAccount: (account: string) => string;
+  resetAccount: (account: string) => string;
+  selectAccount: string;
+  autoSelect: string;
+  later: string;
 } {
   const _t = t();
 
@@ -398,8 +406,11 @@ export function getQuotaWarningCopy(): {
     hourlyLabel: _t("quotaWarning.hourlyLabel"),
     weeklyLabel: _t("quotaWarning.weeklyLabel"),
     reviewLabel: _t("quotaWarning.reviewLabel"),
-    dismiss: _t("quotaWarning.dismiss"),
-    switchNow: _t("quotaWarning.switchNow"),
+    switchAccount: (account: string) => `${_t("quotaWarning.switchAccount")} ${account}`,
+    resetAccount: (account: string) => `${_t("quotaWarning.resetAccount")} ${account}`,
+    selectAccount: _t("quotaWarning.selectAccount"),
+    autoSelect: _t("quotaWarning.autoSelect"),
+    later: _t("quotaWarning.later"),
     message: (account: string, quota: string, value: number, threshold: number) =>
       _t("quotaWarning.message", { account, quota, value, threshold })
   };

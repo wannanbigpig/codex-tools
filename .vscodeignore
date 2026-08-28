@@ -19,8 +19,10 @@ tsconfig.webview.json
 tsconfig.eslint.json
 vite.webview.config.mts
 vitest.config.mts
+eslint.config.mjs
 
 README.en.md
+design-qa.md
 media/dashboard.png
 media/detail.png
 media/setting.png

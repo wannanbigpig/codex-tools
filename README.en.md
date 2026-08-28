@@ -114,9 +114,12 @@ You can change these directly from the settings button in the top-right corner o
   - `Restart automatically`: restart the matching desktop app on account switch if it is already running
   - `Ask every time`: let you confirm each restart manually
 - `Automatic Quota Refresh`
-  - Can be disabled, or set to `5 / 10 / 15 / 30 / 60` minutes
-  - Disabled by default
-  - When disabled, no timed refresh runs
+  - Configure independent timers for the `Current Account` and `All Accounts`
+  - Keep the current account on a frequent interval while refreshing all other saved accounts less often
+  - Defaults to `1` minute for the current account and `15` minutes for all accounts
+  - Either timer can be disabled independently; existing `codexAccounts.autoRefreshMinutes` remains the all-accounts timer
+- `Quota graph history`
+  - Defaults to removing samples older than `7` days; choose another retention period from `1` to `90` days in Settings
 - `5-hour Quota Control`
   - Disabled by default; while disabled, the status bar hides the 5-hour quota and the dashboard keeps it visible
   - Controls whether a valid 5-hour quota can trigger automatic switching or quota warnings

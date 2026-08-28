@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import type { DashboardHostMessage } from "../../src/domain/dashboard/types";
 import type { SendAction } from "./hookTypes";
 import { reduceOAuthActionResult, type OAuthModalState } from "./sessionModalState";
@@ -6,11 +6,14 @@ import { reduceOAuthActionResult, type OAuthModalState } from "./sessionModalSta
 export function useOAuthSessionModal(params: {
   sendAction: SendAction;
   showCopyFeedback: (key: string) => void;
+  openAuthorizationInClient: boolean;
+  getPrepareAccountId?: () => string | undefined;
 }) {
   const [oauthState, setOauthState] = useState<OAuthModalState>({
     oauthFlowStarted: false,
     oauthCallbackUrl: ""
   });
+  const actionInFlight = useRef<"prepare" | "start" | "complete" | undefined>(undefined);
 
   const reset = (): void => {
     setOauthState({
@@ -19,6 +22,7 @@ export function useOAuthSessionModal(params: {
       oauthCallbackUrl: "",
       oauthError: undefined
     });
+    actionInFlight.current = undefined;
   };
 
   const cancelSession = (): void => {
@@ -32,17 +36,35 @@ export function useOAuthSessionModal(params: {
 
   const handleCopyOauthLink = (): void => {
     if (!oauthState.oauthSession?.authUrl) {
+      if (!actionInFlight.current) {
+        actionInFlight.current = "prepare";
+        params.sendAction("prepareOAuthSession", params.getPrepareAccountId?.());
+      }
       return;
     }
-    setOauthState((current) => ({ ...current, oauthFlowStarted: true }));
     params.sendAction("copyText", undefined, { text: oauthState.oauthSession.authUrl });
     params.showCopyFeedback("oauth-link");
   };
 
   const handleStartOAuthAutoFlow = (): void => {
-    if (!oauthState.oauthSession?.authUrl) {
+    if (actionInFlight.current) {
       return;
     }
+    if (!oauthState.oauthSession?.authUrl) {
+      actionInFlight.current = "prepare";
+      params.sendAction("prepareOAuthSession", params.getPrepareAccountId?.());
+      return;
+    }
+    if (params.openAuthorizationInClient) {
+      if (!openOAuthAuthorizationWindow(oauthState.oauthSession.authUrl)) {
+        setOauthState((current) => ({
+          ...current,
+          oauthError: "The browser blocked the authorization window. Allow pop-ups or copy the authorization link."
+        }));
+      }
+      return;
+    }
+    actionInFlight.current = "start";
     setOauthState((current) => ({
       ...current,
       oauthFlowStarted: true,
@@ -54,9 +76,10 @@ export function useOAuthSessionModal(params: {
   };
 
   const handleCompleteOAuth = (): void => {
-    if (!oauthState.oauthSession) {
+    if (!oauthState.oauthSession || !oauthState.oauthCallbackUrl.trim() || actionInFlight.current) {
       return;
     }
+    actionInFlight.current = "complete";
     setOauthState((current) => ({
       ...current,
       oauthFlowStarted: true,
@@ -74,6 +97,12 @@ export function useOAuthSessionModal(params: {
     const reduced = reduceOAuthActionResult(oauthState, message);
     if (!reduced.handled) {
       return { handled: false };
+    }
+    if (message.action === "startOAuthAutoFlow" || message.action === "completeOAuthSession") {
+      actionInFlight.current = undefined;
+    }
+    if (message.action === "prepareOAuthSession") {
+      actionInFlight.current = undefined;
     }
     setOauthState(reduced.next);
     return {
@@ -97,4 +126,12 @@ export function useOAuthSessionModal(params: {
       setOauthState((current) => ({ ...current, oauthCallbackUrl: value }));
     }
   };
+}
+
+export function openOAuthAuthorizationWindow(authUrl: string): boolean {
+  try {
+    return Boolean(window.open(authUrl, "_blank", "noopener,noreferrer"));
+  } catch {
+    return false;
+  }
 }

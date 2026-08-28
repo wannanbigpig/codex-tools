@@ -65,6 +65,9 @@ export function createSharedImportIssue(
 }
 
 export function applySharedAccountEntry(account: CodexAccountRecord, entry: SharedCodexAccountJson): void {
+  // account.enabled and account.queuePriority intentionally remain untouched:
+  // they belong to this PC, even when the rest of the session metadata came
+  // from another machine.
   account.userId = sanitizeOptionalValue(entry.user_id) ?? account.userId;
   account.planType = sanitizeOptionalValue(entry.plan_type) ?? account.planType;
   account.subscriptionActiveUntil = sanitizeOptionalValue(entry.subscription_active_until) ?? account.subscriptionActiveUntil;
@@ -72,6 +75,9 @@ export function applySharedAccountEntry(account: CodexAccountRecord, entry: Shar
   account.organizationId = sanitizeOptionalValue(entry.organization_id) ?? account.organizationId;
   account.accountName = sanitizeOptionalValue(entry.account_name) ?? account.accountName;
   account.tags = normalizeAccountTags(entry.tags, account.tags);
+  if (entry.token_refresh_enabled !== undefined) {
+    account.tokenRefreshEnabled = entry.token_refresh_enabled !== false;
+  }
   account.addedVia = sanitizeOptionalValue(entry.added_via) ?? account.addedVia ?? "json";
   account.accountStructure = sanitizeOptionalValue(entry.account_structure) ?? account.accountStructure;
   account.createdAt = normalizeEpochMs(entry.created_at) ?? account.createdAt;

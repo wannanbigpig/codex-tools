@@ -1,10 +1,15 @@
 import { useEffect, useRef } from "preact/hooks";
-import type { DashboardActionName, DashboardSettingKey, DashboardSettings } from "../../src/domain/dashboard/types";
+import type { DashboardActionName, DashboardNotice, DashboardSettingKey, DashboardSettings } from "../../src/domain/dashboard/types";
+import { noticeFromActionTimeout } from "./actionFeedback";
 import { BLOCKING_GLOBAL_ACTIONS, createActionRequestId, getActionTimeoutMs, postMessageToHost } from "./host";
 import type { AppDispatch, SendAction } from "./hookTypes";
 import type { AppState } from "./state";
 
-export function useDashboardActions(state: AppState, dispatch: AppDispatch) {
+export function useDashboardActions(
+  state: AppState,
+  dispatch: AppDispatch,
+  onNotice: (notice: DashboardNotice) => void
+) {
   const actionTimeoutsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
@@ -27,6 +32,7 @@ export function useDashboardActions(state: AppState, dispatch: AppDispatch) {
 
       const timeoutId = window.setTimeout(() => {
         dispatch({ type: "resolve-action", requestId: request.requestId });
+        onNotice(noticeFromActionTimeout(request.action));
       }, getActionTimeoutMs(request.action));
 
       actionTimeoutsRef.current.set(request.requestId, timeoutId);
@@ -40,7 +46,7 @@ export function useDashboardActions(state: AppState, dispatch: AppDispatch) {
       window.clearTimeout(timeoutId);
       actionTimeoutsRef.current.delete(requestId);
     });
-  }, [dispatch, state.pendingActions]);
+  }, [dispatch, onNotice, state.pendingActions]);
 
   useEffect(() => {
     return () => {

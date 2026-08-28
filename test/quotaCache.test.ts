@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodexAccountRecord, CodexTokens } from "../src/core/types";
 
-const { fetchWithTimeoutMock } = vi.hoisted(() => ({
-  fetchWithTimeoutMock: vi.fn()
+const { fetchWithTimeoutMock, needsTokenRefreshMock, refreshTokensMock } = vi.hoisted(() => ({
+  fetchWithTimeoutMock: vi.fn(),
+  needsTokenRefreshMock: vi.fn(() => false),
+  refreshTokensMock: vi.fn()
 }));
 
 vi.mock("../src/auth/oauth", () => ({
   needsRefresh: vi.fn(() => false),
-  needsTokenRefresh: vi.fn(() => false),
-  refreshTokens: vi.fn()
+  needsTokenRefresh: needsTokenRefreshMock,
+  refreshTokens: refreshTokensMock
 }));
 
 vi.mock("../src/services/workspaceRetry", () => ({
@@ -73,7 +75,33 @@ describe("quota cache invalidation", () => {
 
   beforeEach(() => {
     fetchWithTimeoutMock.mockReset();
+    needsTokenRefreshMock.mockReset().mockReturnValue(false);
+    refreshTokensMock.mockReset();
     clearQuotaCacheForAccount(account.id);
+  });
+
+  it("does not rotate tokens during quota refresh unless explicitly enabled", async () => {
+    needsTokenRefreshMock.mockReturnValue(true);
+    fetchWithTimeoutMock.mockResolvedValue(createUsageResponse(10));
+
+    const result = await refreshQuota(account, tokens, true);
+
+    expect(refreshTokensMock).not.toHaveBeenCalled();
+    expect(result.updatedTokens).toBeUndefined();
+    expect(result.quota?.hourlyPercentage).toBe(90);
+  });
+
+  it("rotates tokens during quota refresh when explicitly enabled", async () => {
+    const refreshableTokens = { ...tokens, refreshToken: "refresh-token" };
+    const refreshedTokens = { ...refreshableTokens, accessToken: "new-access-token" };
+    needsTokenRefreshMock.mockReturnValue(true);
+    refreshTokensMock.mockResolvedValue(refreshedTokens);
+    fetchWithTimeoutMock.mockResolvedValue(createUsageResponse(10));
+
+    const result = await refreshQuota(account, refreshableTokens, true, { allowTokenRefresh: true });
+
+    expect(refreshTokensMock).toHaveBeenCalledWith("refresh-token", tokens.idToken);
+    expect(result.updatedTokens).toEqual(refreshedTokens);
   });
 
   it("does not repopulate cache from an invalidated inflight refresh", async () => {

@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import type { DashboardHostMessage } from "../../src/domain/dashboard/types";
 import type { SendAction } from "./hookTypes";
+import { createShareFileName } from "./helpers";
 
 export function useShareModal(params: {
   sendAction: SendAction;
@@ -8,6 +9,7 @@ export function useShareModal(params: {
 }) {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareModalJson, setShareModalJson] = useState("");
+  const [shareModalFilename, setShareModalFilename] = useState("codex-accounts-share.json");
   const [sharePreviewExpanded, setSharePreviewExpanded] = useState(false);
 
   const handleCopyShareJson = (): void => {
@@ -23,8 +25,17 @@ export function useShareModal(params: {
     if (message.status === "failed") {
       return false;
     }
-    if (message.action === "shareTokens" && message.payload?.sharedJson) {
+    if ((message.action === "shareTokens" || message.action === "exportBackup") && message.payload?.sharedJson) {
       setShareModalJson(message.payload.sharedJson);
+      const filename = createShareFileName();
+      setShareModalFilename(message.action === "exportBackup" ? filename.replace("-share-", "-backup-") : filename);
+      setSharePreviewExpanded(false);
+      setShareModalOpen(true);
+      return true;
+    }
+    if (message.action === "exportAuthFile" && message.payload?.authJson) {
+      setShareModalJson(message.payload.authJson);
+      setShareModalFilename("auth.json");
       setSharePreviewExpanded(false);
       setShareModalOpen(true);
       return true;
@@ -43,6 +54,7 @@ export function useShareModal(params: {
   return {
     shareModalOpen,
     shareModalJson,
+    shareModalFilename,
     sharePreviewExpanded,
     handleCopyShareJson,
     handleDownloadShareJson,
