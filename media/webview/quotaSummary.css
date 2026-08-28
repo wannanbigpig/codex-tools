@@ -5286,8 +5286,12 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
 .account-count-badges {
   display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  max-width: 100%;
+  min-width: 0;
   gap: 3px;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .account-count-badges .header-count-badge {
@@ -7592,7 +7596,7 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
 
 .dashboard-account-toolbar .dashboard-view-controls {
   flex: none;
-  margin-left: auto;
+  margin-left: 0;
 }
 
 @media (max-width: 720px) {
@@ -7616,7 +7620,7 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
   }
 
   .dashboard-account-toolbar .account-search-control {
-    flex: 0 1 140px;
+    flex: 1 1 140px;
     min-width: 110px;
   }
 
@@ -7625,7 +7629,7 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
   }
 
   .dashboard-account-toolbar .dashboard-view-controls {
-    margin-left: auto;
+    margin-left: 0;
   }
 }
 

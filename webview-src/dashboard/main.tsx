@@ -54,7 +54,7 @@ import { resolveDashboardThemeFromMedia } from "./theme";
 import { scheduleDashboardToastDismiss } from "./toast";
 
 const GITHUB_PROJECT_URL = "https://github.com/wannanbigpig/codex-tools";
-const ACCOUNT_SORT_STORAGE_KEY = "codexAccounts.dashboardAccountSort.v2";
+const ACCOUNT_SORT_STORAGE_KEY = "codexAccounts.dashboardAccountSort.v3";
 const UI_PREFERENCES_STORAGE_KEY = "codexAccounts.dashboardUiPreferences.v2";
 const LEGACY_UI_PREFERENCES_STORAGE_KEY = "codexAccounts.dashboardUiPreferences.v1";
 const USAGE_HISTORY_STORAGE_KEY = "codexAccounts.dashboardUsageHistory.v1";
@@ -77,6 +77,11 @@ type UiPreferences = {
   view: DashboardView;
   metricPriority: MetricPriority;
 };
+
+// Reset time is the most useful default for the saved-account cards: accounts
+// whose quota window expires sooner are surfaced first. Users can still choose
+// Auto queue when they want quota-balance prioritisation.
+const DEFAULT_ACCOUNT_SORT: AccountSort = "time-left";
 
 const DEFAULT_UI_PREFERENCES: UiPreferences = {
   filter: "all",
@@ -108,9 +113,9 @@ function App() {
       const stored = window.localStorage.getItem(ACCOUNT_SORT_STORAGE_KEY);
       if (stored === "balance-desc") return "quota";
       if (stored === "next-reset") return "time-left";
-      return isAccountSort(stored) ? stored : "auto-queue";
+      return isAccountSort(stored) ? stored : DEFAULT_ACCOUNT_SORT;
     } catch {
-      return "auto-queue";
+      return DEFAULT_ACCOUNT_SORT;
     }
   });
   const [uiPreferences, setUiPreferences] = useState<UiPreferences>(loadUiPreferences);

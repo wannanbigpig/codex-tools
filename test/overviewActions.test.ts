@@ -54,6 +54,14 @@ describe("overview actions", () => {
     );
   });
 
+  it("keeps account badges on one horizontal row and lets search fill the toolbar", () => {
+    const css = readFileSync("media/webview/quotaSummary.css", "utf8");
+
+    expect(css).toMatch(/\.account-count-badges \{[\s\S]*?flex-wrap: nowrap;/);
+    expect(css).toMatch(/\.dashboard-account-toolbar \.account-search-control \{[\s\S]*?flex: 1 1 140px;/);
+    expect(css).toMatch(/\.dashboard-account-toolbar \.dashboard-view-controls \{[\s\S]*?margin-left: 0;/);
+  });
+
   it("keeps reset availability in the compact badge instead of a second quota block", () => {
     const source = readFileSync("webview-src/dashboard/overviewSection.tsx", "utf8");
     const css = readFileSync("media/webview/quotaSummary.css", "utf8");
