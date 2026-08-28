@@ -527,6 +527,7 @@ export interface DashboardActionPayload {
   enabled?: boolean;
   days?: number;
   sessionId?: string;
+  password?: string;
 }
 
 export interface DashboardCliSessionSummary {

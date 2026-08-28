@@ -239,7 +239,7 @@ async function runDashboardAction(
       await vscode.commands.executeCommand("codexAccounts.openWebDashboard");
       return undefined;
     case "setWebDashboardPassword":
-      await vscode.commands.executeCommand("codexAccounts.setWebDashboardPassword");
+      await vscode.commands.executeCommand("codexAccounts.setWebDashboardPassword", payload?.password);
       ctx.schedulePublishState();
       return undefined;
     case "openExternalUrl":

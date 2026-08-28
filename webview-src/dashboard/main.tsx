@@ -43,6 +43,7 @@ import {
   AccountInfoModal,
   AddAccountModal,
   CliSessionsModal,
+  WebDashboardPasswordModal,
   ConfirmCancelOauthModal,
   SettingsOverlay,
   ShareTokenModal
@@ -120,6 +121,7 @@ function App() {
   const [usageHistory, setUsageHistory] = useState<DashboardUsageSample[]>(loadUsageHistory);
   const [accountInfoAccountId, setAccountInfoAccountId] = useState<string>();
   const [cliSessionsOpen, setCliSessionsOpen] = useState(false);
+  const [webPasswordModalOpen, setWebPasswordModalOpen] = useState(false);
   const [cliSessions, setCliSessions] = useState<DashboardCliSessionSummary[]>([]);
   const [cliSessionMessages, setCliSessionMessages] = useState<DashboardCliSessionMessage[]>([]);
   const [selectedCliSession, setSelectedCliSession] = useState<DashboardCliSessionSummary>();
@@ -987,7 +989,10 @@ function App() {
         onSyncNow={() => sendAction("syncNow")}
         onSetRegistryOverride={(enabled) => sendAction("setEncryptedSyncRegistryOverride", undefined, { enabled })}
         registryOverridePending={isActionPending("setEncryptedSyncRegistryOverride")}
-        onSetWebDashboardPassword={() => sendAction("setWebDashboardPassword")}
+        onSetWebDashboardPassword={() => {
+          if (isBrowserDashboard) setWebPasswordModalOpen(true);
+          else sendAction("setWebDashboardPassword");
+        }}
       />
 
       <AnnouncementCenter
@@ -1014,6 +1019,16 @@ function App() {
         lang={snapshot.lang}
         closeLabel={snapshot.copy.closeModal}
         onClose={() => setAccountInfoAccountId(undefined)}
+      />
+
+      <WebDashboardPasswordModal
+        open={isBrowserDashboard && webPasswordModalOpen}
+        closeLabel={snapshot.copy.closeModal}
+        onClose={() => setWebPasswordModalOpen(false)}
+        onSubmit={(password) => {
+          setWebPasswordModalOpen(false);
+          sendAction("setWebDashboardPassword", undefined, { password });
+        }}
       />
 
       {isBrowserDashboard ? (

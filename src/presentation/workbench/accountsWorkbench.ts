@@ -87,7 +87,7 @@ export class AccountsWorkbench {
       vscode.commands.registerCommand("codexAccounts.setWebDashboardPassword", () =>
         runRegisteredCommand(
           "Set web dashboard password",
-          () => this.webDashboard.promptSetPassword(),
+          (password?: string) => password === undefined ? this.webDashboard.promptSetPassword() : this.webDashboard.setPasswordValue(password),
           "dashboard:set-web-password"
         )
       ),

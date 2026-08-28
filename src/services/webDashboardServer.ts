@@ -152,11 +152,15 @@ export class WebDashboardServer implements vscode.Disposable {
       ignoreFocusOut: true
     });
     if (value === undefined) return;
+    await this.setPasswordValue(value);
+  }
+
+  async setPasswordValue(value: string): Promise<void> {
     if (value && value.length < WEB_DASHBOARD_PASSWORD_MIN_LENGTH) {
       void vscode.window.showErrorMessage(
         `Web Dashboard password must be at least ${WEB_DASHBOARD_PASSWORD_MIN_LENGTH} characters.`
       );
-      return;
+      throw new Error(`Web Dashboard password must be at least ${WEB_DASHBOARD_PASSWORD_MIN_LENGTH} characters.`);
     }
     if (!value) {
       await this.context.secrets.delete(PASSWORD_SECRET_KEY);
@@ -171,7 +175,7 @@ export class WebDashboardServer implements vscode.Disposable {
       void vscode.window.showErrorMessage(
         `Web Dashboard password could not be saved: ${error instanceof Error ? error.message : String(error)}`
       );
-      return;
+      throw error;
     }
     await this.clearSessions();
     void vscode.window.showInformationMessage("Web Dashboard password updated.");
