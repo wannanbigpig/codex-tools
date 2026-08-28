@@ -36,6 +36,7 @@ export async function handleDashboardSettingUpdate(
     case "hourlyQuotaControlEnabled":
     case "autoSwitchReloadWindowEnabled":
     case "backgroundTokenRefreshEnabled":
+    case "cliIntegrationEnabled":
     case "autoResumeCodexSessions":
     case "quotaWarningEnabled":
     case "debugNetwork":

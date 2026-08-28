@@ -121,9 +121,24 @@ export function SettingsOverlay(props: {
               </div>
             </SettingsToggleBlock>
             <SettingsToggleBlock
+              title={props.lang === "zh" ? "CLI 集成" : props.lang === "zh-hant" ? "CLI 整合" : "CLI Integration"}
+              sub={props.lang === "zh" ? "允许按需读取本机 Codex CLI 会话，并作为自动恢复的总开关。" : props.lang === "zh-hant" ? "允許按需讀取本機 Codex CLI 工作階段，並作為自動恢復的總開關。" : "Allow on-demand access to local Codex CLI sessions and gate automatic session resume."}
+              enabled={props.settings.cliIntegrationEnabled === true}
+              onToggle={(enabled) => patchAndSend("cliIntegrationEnabled", enabled)}
+            >
+              <div class="settings-note">
+                {props.settings.cliIntegrationEnabled
+                  ? props.lang === "zh" ? "已启用。浏览器面板可以打开会话列表和消息。" : props.lang === "zh-hant" ? "已啟用。瀏覽器面板可以開啟工作階段清單與訊息。" : "Enabled. The browser dashboard can open the session list and messages."
+                  : props.lang === "zh" ? "已停用。不会读取 CLI 会话文件。" : props.lang === "zh-hant" ? "已停用。不會讀取 CLI 工作階段檔案。" : "Disabled. CLI session files are not read."
+                }
+              </div>
+            </SettingsToggleBlock>
+            <SettingsToggleBlock
               title={sessionResumeCopy.title}
               sub={sessionResumeCopy.sub}
-              enabled={props.settings.autoResumeCodexSessions}
+              enabled={props.settings.cliIntegrationEnabled === true && props.settings.autoResumeCodexSessions === true}
+              disabled={!props.settings.cliIntegrationEnabled}
+              className={`settings-subordinate ${props.settings.cliIntegrationEnabled ? "" : "is-disabled"}`}
               onToggle={(enabled) => patchAndSend("autoResumeCodexSessions", enabled)}
             >
               <div class="settings-note">

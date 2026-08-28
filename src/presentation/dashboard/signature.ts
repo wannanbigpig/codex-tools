@@ -65,6 +65,7 @@ export function buildDashboardStateSignature(state: DashboardState): string {
     state.brandSub,
     state.settings.dashboardTheme,
     state.settings.displayLanguage,
+    state.settings.cliIntegrationEnabled ? "1" : "0",
     state.settings.autoResumeCodexSessions ? "1" : "0",
     state.settings.autoRefreshMinutes,
     state.settings.autoRefreshCurrentMinutes,

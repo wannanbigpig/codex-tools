@@ -2,6 +2,8 @@ import * as vscode from "vscode";
 import { refreshSingleQuota } from "../../application/accounts/quota";
 import { fetchResetCredits, consumeResetCredit } from "../../services/quota";
 import { fetchDailyUsageBreakdown } from "../../services/usage";
+import { readCodexCliSessions, readCodexCliSessionMessages } from "../../services/codexSessionResume";
+import { getCodexAccountsConfiguration } from "../../infrastructure/config/extensionSettings";
 import { upsertDashboardDailyUsageCache } from "../../services/dashboardUsageHistory";
 import { getDashboardCopy } from "../../application/dashboard/copy";
 import type {
@@ -55,7 +57,9 @@ const COMMAND_ROUTED_ACTIONS = new Set<DashboardActionName>([
   "refreshView",
   "reloadPrompt",
   "getResetCredits",
-  "getDailyUsage"
+  "getDailyUsage",
+  "listCodexCliSessions",
+  "getCodexCliSessionMessages"
 ]);
 import type { DashboardOAuthCoordinator } from "./oauthCoordinator";
 import { ExtensionSettingsStore } from "../../infrastructure/config/extensionSettings";
@@ -343,6 +347,10 @@ async function runDashboardAction(
       return handleGetResetCredits(ctx.repo, account);
     case "getDailyUsage":
       return handleGetDailyUsage(ctx.context, ctx.repo, account, payload?.days);
+    case "listCodexCliSessions":
+      return handleListCodexCliSessions();
+    case "getCodexCliSessionMessages":
+      return handleGetCodexCliSessionMessages(payload?.sessionId);
     case "consumeResetCredit":
       return handleConsumeResetCredit(ctx.repo, account, ctx.schedulePublishState, ctx.resolveLanguage());
     default:
@@ -1011,6 +1019,28 @@ async function handleGetDailyUsage(
   }
   await upsertDashboardDailyUsageCache(context, account.id, dailyUsage);
   return { dailyUsage };
+}
+
+function ensureCliIntegrationEnabled(): void {
+  if (!getCodexAccountsConfiguration().get<boolean>("cliIntegrationEnabled", false)) {
+    throw new Error("CLI Integration is disabled. Enable it in Settings before opening CLI sessions.");
+  }
+}
+
+async function handleListCodexCliSessions() {
+  ensureCliIntegrationEnabled();
+  return { cliSessions: await readCodexCliSessions() };
+}
+
+async function handleGetCodexCliSessionMessages(sessionId: string | undefined) {
+  ensureCliIntegrationEnabled();
+  if (!sessionId) throw new Error("Choose a Codex CLI session first.");
+  const [cliSessions, cliSessionMessages] = await Promise.all([
+    readCodexCliSessions(),
+    readCodexCliSessionMessages(sessionId)
+  ]);
+  const cliSession = cliSessions.find((session) => session.id === sessionId);
+  return { cliSession, cliSessionMessages };
 }
 
 async function handleConsumeResetCredit(

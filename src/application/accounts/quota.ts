@@ -515,20 +515,23 @@ export async function maybeWarnForAccount(repo: AccountsRepository, accountId: s
   }
 
   const checks: Array<{ dimension: "hourly" | "weekly"; label: string; value: number }> = [];
+  const weeklyLabel = hasComparableWeeklyWindow(account)
+    ? resolveLongQuotaLabel(
+        account.planType,
+        account.quotaSummary.weeklyWindowMinutes,
+        getLanguage(),
+        copy.weeklyLabel
+      )
+    : undefined;
   if (hourlyQuotaControlEnabled && hasComparableHourlyWindow(account)) {
     checks.push({ dimension: "hourly", label: copy.hourlyLabel, value: account.quotaSummary.hourlyPercentage });
   } else {
     clearQuotaWarningCount(account.id, "hourly");
   }
-  if (hasComparableWeeklyWindow(account)) {
+  if (weeklyLabel) {
     checks.push({
       dimension: "weekly",
-      label: resolveLongQuotaLabel(
-        account.planType,
-        account.quotaSummary.weeklyWindowMinutes,
-        getLanguage(),
-        copy.weeklyLabel
-      ),
+      label: weeklyLabel,
       value: account.quotaSummary.weeklyPercentage
     });
   } else {
@@ -563,8 +566,8 @@ export async function maybeWarnForAccount(repo: AccountsRepository, accountId: s
     ];
     const warningMessage =
       copy.message(accountLabel, check.label, check.value, threshold) +
-      (resetAvailable && check.dimension !== "weekly" && hasComparableWeeklyWindow(account)
-        ? ` ${copy.resetAvailableSummary(copy.weeklyLabel, account.quotaSummary.weeklyPercentage)}`
+      (check.dimension !== "weekly" && weeklyLabel
+        ? ` ${copy.balanceSummary(weeklyLabel, account.quotaSummary.weeklyPercentage)}`
         : "");
     void vscode.window
       .showWarningMessage(

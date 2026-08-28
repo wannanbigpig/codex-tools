@@ -2,6 +2,10 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
+import type {
+  DashboardCliSessionMessage,
+  DashboardCliSessionSummary
+} from "../domain/dashboard/types";
 import {
   CrossWindowOperationBusyError,
   runCrossWindowExclusive
@@ -14,6 +18,15 @@ const CODEX_CONVERSATION_AUTHORITY = "route";
 const SESSION_STATE_KEY = "codexAccounts.openCodexConversations";
 const MAX_TRACKED_SESSIONS = 8;
 const SESSION_INDEX_FILE = "session_index.jsonl";
+const SESSION_DIRECTORY = "sessions";
+const SESSION_LOCK_DIRECTORY = "thread-writer-locks";
+const MAX_SESSION_INDEX_BYTES = 5 * 1024 * 1024;
+const MAX_SESSION_TRANSCRIPT_BYTES = 25 * 1024 * 1024;
+const MAX_VISIBLE_CLI_SESSIONS = 30;
+const MAX_VISIBLE_SESSION_MESSAGES = 250;
+const MAX_SESSION_MESSAGE_CHARS = 12_000;
+const MAX_SESSION_SCAN_ENTRIES = 10_000;
+const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type TrackedCodexConversation = {
   uri: string;
@@ -35,12 +48,16 @@ export class CodexSessionResumeManager implements vscode.Disposable {
   start(): void {
     this.disposables.push(
       vscode.window.tabGroups.onDidChangeTabs(() => {
-        if (!this.restoring) {
+        if (!this.restoring && this.isCliIntegrationEnabled()) {
           void this.rememberOpenConversations();
         }
       }),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration("codexAccounts.autoResumeCodexSessions") && this.isAutoResumeEnabled()) {
+        if (
+          (event.affectsConfiguration("codexAccounts.cliIntegrationEnabled") ||
+            event.affectsConfiguration("codexAccounts.autoResumeCodexSessions")) &&
+          this.isAutoResumeEnabled()
+        ) {
           void this.runResumeSavedSessions(true);
         }
       }),
@@ -68,6 +85,12 @@ export class CodexSessionResumeManager implements vscode.Disposable {
   }
 
   private async resumeLatestCliSession(): Promise<boolean> {
+    if (!this.isCliIntegrationEnabled()) {
+      void vscode.window.showWarningMessage(
+        "CLI Integration is disabled. Enable it in Codex Accounts settings before opening CLI sessions."
+      );
+      return false;
+    }
     const session = await readLatestCliSession();
     if (!session) {
       void vscode.window.showInformationMessage("No saved Codex CLI session was found.");
@@ -131,7 +154,14 @@ export class CodexSessionResumeManager implements vscode.Disposable {
   }
 
   private isAutoResumeEnabled(): boolean {
-    return vscode.workspace.getConfiguration("codexAccounts").get<boolean>("autoResumeCodexSessions", false);
+    return (
+      this.isCliIntegrationEnabled() &&
+      vscode.workspace.getConfiguration("codexAccounts").get<boolean>("autoResumeCodexSessions", false)
+    );
+  }
+
+  private isCliIntegrationEnabled(): boolean {
+    return vscode.workspace.getConfiguration("codexAccounts").get<boolean>("cliIntegrationEnabled", false);
   }
 
   private async resumeSavedSessions(automatic: boolean): Promise<boolean> {
@@ -242,6 +272,67 @@ async function readLatestCliSession(): Promise<CliSessionIndexEntry | undefined>
   }
 }
 
+export async function readCodexCliSessions(
+  codexHome = resolveCodexHome(),
+  limit = MAX_VISIBLE_CLI_SESSIONS
+): Promise<DashboardCliSessionSummary[]> {
+  const indexPath = path.join(codexHome, SESSION_INDEX_FILE);
+  const stat = await fs.stat(indexPath).catch(() => undefined);
+  if (!stat) return [];
+  if (stat.size > MAX_SESSION_INDEX_BYTES) {
+    throw new Error("The Codex CLI session index is too large to read safely.");
+  }
+
+  const raw = await fs.readFile(indexPath, "utf8");
+  const entries = raw
+    .split(/\r?\n/)
+    .map(parseCliSessionEntry)
+    .filter((entry): entry is CliSessionIndexEntry => Boolean(entry))
+    .sort((left, right) => String(right.updated_at ?? "").localeCompare(String(left.updated_at ?? "")));
+  const unique = new Map<string, CliSessionIndexEntry>();
+  for (const entry of entries) {
+    if (!unique.has(entry.id)) unique.set(entry.id, entry);
+  }
+
+  const cappedLimit = Math.max(1, Math.min(MAX_VISIBLE_CLI_SESSIONS, Math.round(limit)));
+  return Promise.all(
+    [...unique.values()].slice(0, cappedLimit).map(async (entry) => ({
+      id: entry.id,
+      title: normalizeSessionTitle(entry.thread_name, entry.id),
+      updatedAt: normalizeTimestamp(entry.updated_at),
+      status: (await isCliSessionRunning(codexHome, entry.id)) ? "running" as const : "idle" as const
+    }))
+  );
+}
+
+export async function readCodexCliSessionMessages(
+  sessionId: string,
+  codexHome = resolveCodexHome()
+): Promise<DashboardCliSessionMessage[]> {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    throw new Error("The Codex CLI session identifier is invalid.");
+  }
+  const transcriptPath = await findCliSessionTranscript(codexHome, sessionId);
+  if (!transcriptPath) {
+    throw new Error("The Codex CLI session transcript was not found on this PC.");
+  }
+  const stat = await fs.stat(transcriptPath);
+  if (stat.size > MAX_SESSION_TRANSCRIPT_BYTES) {
+    throw new Error("This Codex CLI session is too large to display safely.");
+  }
+
+  const raw = await fs.readFile(transcriptPath, "utf8");
+  const messages: DashboardCliSessionMessage[] = [];
+  let sequence = 0;
+  for (const line of raw.split(/\r?\n/)) {
+    const message = parseCliSessionMessage(line, sequence);
+    if (!message) continue;
+    messages.push(message);
+    sequence += 1;
+  }
+  return messages.slice(-MAX_VISIBLE_SESSION_MESSAGES);
+}
+
 function parseCliSessionEntry(line: string): CliSessionIndexEntry | undefined {
   try {
     const value = JSON.parse(line) as Partial<CliSessionIndexEntry>;
@@ -253,9 +344,93 @@ function parseCliSessionEntry(line: string): CliSessionIndexEntry | undefined {
   }
 }
 
-function resolveCodexHome(): string {
+export function resolveCodexHome(): string {
   const configured = process.env["CODEX_HOME"]?.trim().replace(/^['"]|['"]$/g, "");
   return configured || path.join(os.homedir(), ".codex");
+}
+
+function normalizeSessionTitle(value: string | undefined, id: string): string {
+  const title = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+  return (title || `Codex session ${id.slice(0, 8)}`).slice(0, 160);
+}
+
+function normalizeTimestamp(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined;
+}
+
+async function isCliSessionRunning(codexHome: string, sessionId: string): Promise<boolean> {
+  const lockPath = path.join(codexHome, SESSION_LOCK_DIRECTORY, `${sessionId}.lock`);
+  const stat = await fs.stat(lockPath).catch(() => undefined);
+  if (!stat) return false;
+  // Codex refreshes writer locks for active threads. Treat old orphaned files as idle.
+  return Date.now() - stat.mtimeMs < 15 * 60 * 1000;
+}
+
+async function findCliSessionTranscript(codexHome: string, sessionId: string): Promise<string | undefined> {
+  const root = path.join(codexHome, SESSION_DIRECTORY);
+  const pending = [root];
+  let scanned = 0;
+  while (pending.length > 0 && scanned < MAX_SESSION_SCAN_ENTRIES) {
+    const directory = pending.pop()!;
+    const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      scanned += 1;
+      if (scanned > MAX_SESSION_SCAN_ENTRIES) break;
+      if (entry.isSymbolicLink()) continue;
+      const candidate = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(candidate);
+      } else if (entry.isFile() && entry.name.endsWith(".jsonl") && entry.name.includes(sessionId)) {
+        return candidate;
+      }
+    }
+  }
+  return undefined;
+}
+
+function parseCliSessionMessage(line: string, sequence: number): DashboardCliSessionMessage | undefined {
+  try {
+    const value = JSON.parse(line) as {
+      timestamp?: unknown;
+      type?: unknown;
+      payload?: {
+        type?: unknown;
+        role?: unknown;
+        phase?: unknown;
+        content?: unknown;
+      };
+    };
+    const payload = value.type === "response_item" ? value.payload : undefined;
+    const role = payload?.role;
+    if (payload?.type !== "message" || (role !== "user" && role !== "assistant")) return undefined;
+    if (role === "assistant" && payload.phase && payload.phase !== "commentary" && payload.phase !== "final_answer") {
+      return undefined;
+    }
+    if (!Array.isArray(payload.content)) return undefined;
+    const parts: string[] = [];
+    for (const item of payload.content) {
+      if (!item || typeof item !== "object") continue;
+      const content = item as { type?: unknown; text?: unknown };
+      if ((content.type === "input_text" || content.type === "output_text") && typeof content.text === "string") {
+        const text = content.text.trim();
+        if (text) parts.push(text);
+      } else if (content.type === "input_image") {
+        parts.push("[Image]");
+      }
+    }
+    const text = parts.join("\n\n").trim();
+    if (!text) return undefined;
+    return {
+      id: `${sequence}-${typeof value.timestamp === "string" ? value.timestamp : "message"}`,
+      role,
+      text: text.slice(0, MAX_SESSION_MESSAGE_CHARS),
+      timestamp: typeof value.timestamp === "string" ? normalizeTimestamp(value.timestamp) : undefined
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function createLocalCodexConversationUri(sessionId: string): vscode.Uri {

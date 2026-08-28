@@ -169,6 +169,7 @@ export type TranslationKey =
   | "quotaWarning.hourlyLabel"
   | "quotaWarning.weeklyLabel"
   | "quotaWarning.reviewLabel"
+  | "quotaWarning.balanceLabel"
   | "quotaWarning.message"
   | "quotaWarning.dismiss"
   | "quotaWarning.switchNow"
@@ -393,6 +394,7 @@ export function getQuotaWarningCopy(): {
   hourlyLabel: string;
   weeklyLabel: string;
   reviewLabel: string;
+  balanceSummary: (quotaLabel: string, value: number) => string;
   message: (account: string, quota: string, value: number, threshold: number) => string;
   switchAccount: (account: string) => string;
   resetAccount: (account: string) => string;
@@ -409,6 +411,8 @@ export function getQuotaWarningCopy(): {
     reviewLabel: _t("quotaWarning.reviewLabel"),
     switchAccount: (account: string) => `${_t("quotaWarning.switchAccount")} ${account}`,
     resetAccount: (account: string) => `${_t("quotaWarning.resetAccount")} ${account}`,
+    balanceSummary: (quotaLabel: string, value: number) =>
+      `${quotaLabel} ${value}% ${_t("quotaWarning.balanceLabel")}.`,
     resetAvailableSummary: (weeklyLabel: string, weeklyValue: number) =>
       `${weeklyLabel}: ${weeklyValue}% · ${_t("quotaWarning.resetAccount")}.`,
     selectAccount: _t("quotaWarning.selectAccount"),

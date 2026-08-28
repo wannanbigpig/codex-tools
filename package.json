@@ -113,6 +113,11 @@
           "default": false,
           "markdownDescription": "Reopen the official VS Code Codex conversation tabs that were open in this workspace after VS Code starts or reloads. Stores only the tab URIs and labels; it does not inspect accounts or conversation content."
         },
+        "codexAccounts.cliIntegrationEnabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Allow the dashboard to read local Codex CLI session indexes and transcripts on demand, and gate automatic VS Code Codex session resume. No session files are read while this is disabled."
+        },
         "codexAccounts.backgroundTokenRefreshEnabled": {
           "type": "boolean",
           "default": false,

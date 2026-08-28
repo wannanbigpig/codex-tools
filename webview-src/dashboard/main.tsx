@@ -6,6 +6,8 @@ import type {
   DashboardAccountViewModel,
   DashboardActionName,
   DashboardActionPayload,
+  DashboardCliSessionMessage,
+  DashboardCliSessionSummary,
   DashboardNotice,
   DashboardUsageSample
 } from "../../src/domain/dashboard/types";
@@ -40,6 +42,7 @@ import {
   AboutModal,
   AccountInfoModal,
   AddAccountModal,
+  CliSessionsModal,
   ConfirmCancelOauthModal,
   SettingsOverlay,
   ShareTokenModal
@@ -116,6 +119,12 @@ function App() {
   const [shareExportCount, setShareExportCount] = useState(0);
   const [usageHistory, setUsageHistory] = useState<DashboardUsageSample[]>(loadUsageHistory);
   const [accountInfoAccountId, setAccountInfoAccountId] = useState<string>();
+  const [cliSessionsOpen, setCliSessionsOpen] = useState(false);
+  const [cliSessions, setCliSessions] = useState<DashboardCliSessionSummary[]>([]);
+  const [cliSessionMessages, setCliSessionMessages] = useState<DashboardCliSessionMessage[]>([]);
+  const [selectedCliSession, setSelectedCliSession] = useState<DashboardCliSessionSummary>();
+  const [cliSessionsError, setCliSessionsError] = useState<string>();
+  const [cliSessionMessagesError, setCliSessionMessagesError] = useState<string>();
   const [dailyUsageByAccount, setDailyUsageByAccount] = useState<Record<string, CodexDailyUsageBreakdown>>({});
   const [dailyUsageErrorByAccount, setDailyUsageErrorByAccount] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<DashboardNotice>();
@@ -151,6 +160,23 @@ function App() {
             ...current,
             [message.accountId!]: message.error ?? "Daily usage could not be loaded."
           }));
+        }
+      }
+      if (message.type === "dashboard:action-result" && message.action === "listCodexCliSessions") {
+        if (message.status === "completed") {
+          setCliSessions(message.payload?.cliSessions ?? []);
+          setCliSessionsError(undefined);
+        } else {
+          setCliSessionsError(message.error ?? "CLI sessions could not be loaded.");
+        }
+      }
+      if (message.type === "dashboard:action-result" && message.action === "getCodexCliSessionMessages") {
+        if (message.status === "completed") {
+          setCliSessionMessages(message.payload?.cliSessionMessages ?? []);
+          setSelectedCliSession(message.payload?.cliSession ?? selectedCliSession);
+          setCliSessionMessagesError(undefined);
+        } else {
+          setCliSessionMessagesError(message.error ?? "Session messages could not be loaded.");
         }
       }
     },
@@ -311,6 +337,20 @@ function App() {
   const accountInfoAccount = accountInfoAccountId
     ? snapshot.accounts.find((account) => account.id === accountInfoAccountId)
     : undefined;
+  const openCliSessions = (): void => {
+    setCliSessionsOpen(true);
+    setSelectedCliSession(undefined);
+    setCliSessionMessages([]);
+    setCliSessionsError(undefined);
+    setCliSessionMessagesError(undefined);
+    sendAction("listCodexCliSessions");
+  };
+  const selectCliSession = (session: DashboardCliSessionSummary): void => {
+    setSelectedCliSession(session);
+    setCliSessionMessages([]);
+    setCliSessionMessagesError(undefined);
+    sendAction("getCodexCliSessionMessages", undefined, { sessionId: session.id });
+  };
   const availableTags = useMemo(
     () =>
       [...new Set(snapshot.accounts.flatMap((account) => account.tags))].sort((left, right) =>
@@ -581,6 +621,18 @@ function App() {
                   </span>
                 ) : null}
               </button>
+              {isBrowserDashboard && snapshot.settings.cliIntegrationEnabled === true ? (
+                <button
+                  id="cliSessionsButton"
+                  class="settings-btn action-btn icon-only"
+                  type="button"
+                  title="CLI Sessions"
+                  aria-label="CLI Sessions"
+                  onClick={openCliSessions}
+                >
+                  <span class="button-face"><span class="button-icon">◉</span></span>
+                </button>
+              ) : null}
               <button
                 id="githubProjectButton"
                 class="settings-btn action-btn github-project-btn"
@@ -696,6 +748,8 @@ function App() {
             onRefreshQuota={() => {
               if (overviewAccount) sendAction("refresh", overviewAccount.id);
             }}
+            showCliSessions={isBrowserDashboard && snapshot.settings.cliIntegrationEnabled === true}
+            onOpenCliSessions={openCliSessions}
           />
         </section>
         {snapshot.accounts.length > 0 ? (
@@ -961,6 +1015,24 @@ function App() {
         closeLabel={snapshot.copy.closeModal}
         onClose={() => setAccountInfoAccountId(undefined)}
       />
+
+      {isBrowserDashboard ? (
+        <CliSessionsModal
+          open={cliSessionsOpen}
+          lang={snapshot.lang}
+          closeLabel={snapshot.copy.closeModal}
+          sessions={cliSessions}
+          selectedSession={selectedCliSession}
+          messages={cliSessionMessages}
+          loading={isActionPending("listCodexCliSessions")}
+          messagesLoading={isActionPending("getCodexCliSessionMessages")}
+          error={cliSessionsError}
+          messagesError={cliSessionMessagesError}
+          onClose={() => setCliSessionsOpen(false)}
+          onSelect={selectCliSession}
+          onBack={() => { setSelectedCliSession(undefined); setCliSessionMessages([]); setCliSessionMessagesError(undefined); }}
+        />
+      ) : null}
 
       <AddAccountModal
         open={modals.addAccountModalOpen}

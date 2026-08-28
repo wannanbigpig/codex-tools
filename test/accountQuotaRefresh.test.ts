@@ -878,7 +878,10 @@ describe("quota warning window validation", () => {
     await maybeWarnForAccount(repo as unknown as AccountsRepository, account.id);
 
     expect(showWarning).toHaveBeenCalledTimes(1);
-    expect(showWarning.mock.calls[0]?.[0]).toContain("5%");
+    expect(showWarning.mock.calls[0]?.[0]).toContain(
+      "active@example.com Weekly quota is at 5%, below your configured threshold of 10%."
+    );
+    expect(showWarning.mock.calls[0]?.[0]).not.toContain("Balance");
     expect(showWarning.mock.calls[0]?.slice(1)).toEqual([
       "Switch recommended@example.com",
       "Select Account",
@@ -933,6 +936,33 @@ describe("quota warning window validation", () => {
     await vi.waitFor(() => expect(executeCommand).toHaveBeenCalledWith("codexAccounts.switchAccount", target));
   });
 
+  it("appends the weekly balance to a 5h warning without requiring reset credits", async () => {
+    vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue({
+      get: vi.fn((key: string, defaultValue?: unknown) => {
+        const values: Record<string, unknown> = {
+          quotaWarningEnabled: true,
+          hourlyQuotaControlEnabled: true,
+          quotaWarningThreshold: 10
+        };
+        return values[key] ?? defaultValue;
+      })
+    } as never);
+    const showWarning = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(undefined);
+    const account = createAccount("balance-warning", true, 7, 64);
+    const repo = {
+      getAccount: vi.fn(async () => account),
+      listAccounts: vi.fn(async () => [account])
+    };
+
+    await maybeWarnForAccount(repo as unknown as AccountsRepository, account.id);
+
+    expect(showWarning).toHaveBeenCalledWith(
+      "balance-warning@example.com 5h quota is at 7%, below your configured threshold of 10%. Weekly 64% Balance.",
+      "Select Account",
+      "Later"
+    );
+  });
+
   it("shows weekly quota in a 5h warning with Reset and the recommended switch target", async () => {
     vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue({
       get: vi.fn((key: string, defaultValue?: unknown) => {
@@ -959,8 +989,9 @@ describe("quota warning window validation", () => {
 
     await maybeWarnForAccount(repo as unknown as AccountsRepository, account.id);
 
-    expect(showWarning.mock.calls[0]?.[0]).toContain("Weekly: 95%");
-    expect(showWarning.mock.calls[0]?.[0]).toContain("Reset");
+    expect(showWarning.mock.calls[0]?.[0]).toBe(
+      "reset-action@example.com 5h quota is at 6%, below your configured threshold of 10%. Weekly 95% Balance."
+    );
     expect(showWarning.mock.calls[0]?.slice(1)).toEqual([
       "Switch reset-target@example.com",
       "Reset reset-action@example.com",

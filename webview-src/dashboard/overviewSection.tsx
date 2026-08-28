@@ -55,6 +55,8 @@ export function OverviewSection(props: {
   onSwitchAccount: (accountId?: string) => void;
   onReloadAccount: () => void;
   onRefreshQuota: () => void;
+  showCliSessions?: boolean;
+  onOpenCliSessions?: () => void;
 }) {
   const { account, copy, settings, now, hasAccounts, privacyMode } = props;
   const emptyTitle = hasAccounts ? copy.noActiveAccountTitle : copy.empty;
@@ -76,7 +78,7 @@ export function OverviewSection(props: {
   const lockPopoverContentRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const morePopoverContentRef = useRef<HTMLDivElement>(null);
-  const [lockPopoverPosition, setLockPopoverPosition] = useState({ top: 0, right: 0 });
+  const [lockPopoverPosition] = useState({ top: 0, right: 0 });
   const [morePopoverPosition, setMorePopoverPosition] = useState({ top: 0, right: 0 });
   const switchTarget = account && props.accounts
     ? props.accounts
@@ -91,13 +93,6 @@ export function OverviewSection(props: {
   const contextAction = account
     ? resolveOverviewContextAction(account, settings.encryptedSyncRegistryOverrideEnabled)
     : "switch";
-  const openLockDialog = (trigger: HTMLElement): void => {
-    const rect = trigger.getBoundingClientRect();
-    setLockPopoverPosition({ top: rect.bottom + 5, right: Math.max(8, window.innerWidth - rect.right) });
-    setMoreOpen(false);
-    setLockMinutes(resolveLockMinutes(settings.autoSwitchLockMinutes));
-    setLockDialogOpen(true);
-  };
   const toggleMoreMenu = (): void => {
     if (!moreOpen) {
       const rect = moreRef.current?.getBoundingClientRect();
@@ -419,16 +414,11 @@ export function OverviewSection(props: {
                               🛟 {resolveOverviewMenuLabel(settings.encryptedSyncRegistryOverrideEnabled ? "rescueOff" : "rescue", props.lang)}
                             </button>
                           ) : null}
-                          <button type="button" role="menuitem" onClick={(event) => {
-                            if (account.autoSwitchLockedUntil) {
-                              setMoreOpen(false);
-                              props.onSetAutoSwitchLock(0);
-                            } else {
-                              openLockDialog(event.currentTarget);
-                            }
-                          }}>
-                            {account.autoSwitchLockedUntil ? "🔓" : "🔒"} {resolveOverviewMenuLabel("lock", props.lang)}
-                          </button>
+                          {props.showCliSessions && props.onOpenCliSessions ? (
+                            <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); props.onOpenCliSessions!(); }}>
+                              ◉ Sessions
+                            </button>
+                          ) : null}
                         </div>,
                         document.body
                       )
@@ -569,7 +559,8 @@ function resolveLockDialogText(key: "title" | "minutes" | "apply" | "cancel", la
   return copy[key];
 }
 
-export type UsageEvent = { at: number; accountId: string; used: number };
+export type UsageSegment = { key: string; used: number; color: string };
+export type UsageEvent = { at: number; accountId: string; used: number; segments?: UsageSegment[] };
 type UsageGraphRange = "1h" | "3h" | "6h" | "24h" | "7d" | "30d";
 const USAGE_GRAPH_COLORS = ["#58a6ff", "#3fb950", "#d29922", "#bc8cff", "#f778ba", "#f0883e"];
 const USAGE_DEVICE_COLORS = ["#79c0ff", "#56d364", "#e3b341", "#d2a8ff", "#ff7bce", "#ffa657"];
@@ -604,6 +595,11 @@ function UsageGraph(props: {
   const [graphMode, setGraphMode] = useState<"quota" | "tokens">("quota");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hoveredEvent, setHoveredEvent] = useState<{ event: UsageEvent; label: string; left: number; top: number }>();
+  useEffect(() => {
+    if (graphMode === "tokens" && !props.dailyUsage && !props.dailyUsagePending && !props.dailyUsageError) {
+      props.onLoadDailyUsage?.();
+    }
+  }, [graphMode, props.dailyUsage, props.dailyUsagePending, props.dailyUsageError, props.onLoadDailyUsage]);
   const graphStageRef = useRef<HTMLDivElement>(null);
   const accountMap = new Map(
     props.accounts.map((account, index) => [
@@ -622,7 +618,9 @@ function UsageGraph(props: {
   const tokenEvents: UsageEvent[] = (props.dailyUsage?.points ?? []).flatMap((point) => {
     const at = Date.parse(`${point.date}T12:00:00Z`);
     const accountId = props.accounts.find((account) => account.isActive)?.id ?? props.accounts[0]?.id;
-    return Number.isFinite(at) && accountId && point.totalTokens >= 0 ? [{ at, accountId, used: point.totalTokens }] : [];
+    return Number.isFinite(at) && accountId && point.totalTokens >= 0
+      ? [{ at, accountId, used: point.totalTokens, segments: buildDailyUsageSegments(point) }]
+      : [];
   });
   const sourceEvents = graphMode === "tokens" ? tokenEvents : buildUsageEvents(props.history);
   const oldestHistoryAt = sourceEvents.reduce(
@@ -712,7 +710,6 @@ function UsageGraph(props: {
                 <strong>{props.lang === "zh" ? "数据" : "Data"}</strong>
                 <button type="button" class={graphMode === "quota" ? "active" : ""} onClick={() => { setGraphMode("quota"); setRange("1h"); setWindowOffset(0); setSettingsOpen(false); }}>Quota changes</button>
                 <button type="button" class={graphMode === "tokens" ? "active" : ""} onClick={() => { setGraphMode("tokens"); setRange("30d"); setWindowOffset(0); }}>Daily token usage</button>
-                {graphMode === "tokens" && !props.dailyUsage ? <button type="button" disabled={props.dailyUsagePending} onClick={props.onLoadDailyUsage}>{props.dailyUsagePending ? "Loading…" : "Load usage"}</button> : null}
                 {props.dailyUsageError ? <span class="usage-graph-settings-error" role="alert">{props.dailyUsageError}</span> : null}
               </div>
             ) : null}
@@ -778,21 +775,30 @@ function UsageGraph(props: {
                 const normalizedUsage = Math.max(0, Math.min(1, event.used / maxUsage));
                 const height = Math.max(3, Math.sqrt(normalizedUsage) * USAGE_GRAPH_MAX_BAR_HEIGHT);
                 const y = USAGE_GRAPH_BASELINE - height;
-                const ariaLabel = `${account.label}: ${formatUsageValue(event.used)} ${props.lang === "zh" ? "配额使用" : "quota used"}, ${formatGraphTime(event.at, props.lang, graphAxisMode)}`;
+                const ariaLabel = graphMode === "tokens"
+                  ? `${props.lang === "zh" ? "每日 token 用量" : "Daily token usage"}: ${formatUsageValue(event.used)} tokens, ${formatGraphTime(event.at, props.lang, graphAxisMode)}`
+                  : `${account.label}: ${formatUsageValue(event.used)} ${props.lang === "zh" ? "配额使用" : "quota used"}, ${formatGraphTime(event.at, props.lang, graphAxisMode)}`;
+                const segments = event.segments?.length ? event.segments : [{ key: "quota", used: event.used, color: account.color }];
+                let segmentOffset = 0;
                 return (
-                  <rect
-                    key={`${event.accountId}-${event.at}`}
-                    class="usage-graph-bar"
-                    x={x}
-                    y={y}
-                    width={barWidth}
-                    height={height}
-                    rx={barWidth * 0.28}
-                    fill={account.color}
-                    style={{ animationDelay: `${(index % 10) * 110}ms` }}
-                    tabIndex={0}
-                    aria-label={ariaLabel}
-                    onMouseEnter={(pointerEvent) => {
+                  <g key={`${event.accountId}-${event.at}`}>
+                    {segments.map((segment, segmentIndex) => {
+                      const segmentHeight = height * (segment.used / Math.max(event.used, 1));
+                      const segmentY = USAGE_GRAPH_BASELINE - segmentOffset - segmentHeight;
+                      segmentOffset += segmentHeight;
+                      return <rect key={`${segment.key}-${segmentIndex}`} class="usage-graph-bar" x={x} y={segmentY} width={barWidth} height={Math.max(1, segmentHeight)} rx={barWidth * 0.18} fill={segment.color} />;
+                    })}
+                    <rect
+                      class="usage-graph-bar-hitarea"
+                      x={x}
+                      y={y}
+                      width={barWidth}
+                      height={height}
+                      fill="transparent"
+                      style={{ animationDelay: `${(index % 10) * 110}ms` }}
+                      tabIndex={0}
+                      aria-label={ariaLabel}
+                      onMouseEnter={(pointerEvent) => {
                       const stage = graphStageRef.current?.getBoundingClientRect();
                       const bar = pointerEvent.currentTarget.getBoundingClientRect();
                       if (stage) {
@@ -816,9 +822,9 @@ function UsageGraph(props: {
                         });
                       }
                     }}
-                    onBlur={() => setHoveredEvent(undefined)}
-                  >
-                  </rect>
+                      onBlur={() => setHoveredEvent(undefined)}
+                    />
+                  </g>
                 );
               })}
             </svg>
@@ -841,10 +847,13 @@ function UsageGraph(props: {
             role="status"
             style={{ left: `${Math.min(96, Math.max(4, hoveredEvent.left))}%`, top: `${hoveredEvent.top}px` }}
           >
-            <strong>{hoveredEvent.label}</strong>
-            <span>
-              {formatUsageValue(hoveredEvent.event.used)} {props.lang === "zh" ? "配额使用" : "quota used"}
-            </span>
+            <strong>{graphMode === "tokens" ? (props.lang === "zh" ? "每日 token 用量" : "Daily token usage") : hoveredEvent.label}</strong>
+            <span>{formatUsageValue(hoveredEvent.event.used)} {graphMode === "tokens" ? "tokens" : props.lang === "zh" ? "配额使用" : "quota used"}</span>
+            {graphMode === "tokens" && hoveredEvent.event.segments?.length ? (
+              <div class="usage-graph-tooltip-breakdown">
+                {hoveredEvent.event.segments.map((segment) => <span key={segment.key}><i style={{ background: segment.color }} />{segment.key}: {formatUsageValue(segment.used)}</span>)}
+              </div>
+            ) : null}
             <time>{formatGraphTime(hoveredEvent.event.at, props.lang, graphAxisMode)}</time>
           </div>
         ) : null}
@@ -854,8 +863,48 @@ function UsageGraph(props: {
           </div>
         ) : null}
       </div>
+      {graphMode === "tokens" && props.dailyUsage ? <DailyUsageBreakdown usage={props.dailyUsage} /> : null}
     </div>
   );
+}
+
+function DailyUsageBreakdown(props: { usage: CodexDailyUsageBreakdown }) {
+  const points = props.usage.points;
+  const sum = (key: keyof CodexDailyUsageBreakdown["points"][number]): number =>
+    points.reduce((total, point) => total + (typeof point[key] === "number" ? (point[key] as number) : 0), 0);
+  const items = ([
+    ["Total", sum("totalTokens")],
+    ["Extension", sum("extensionTokens")],
+    ["Other", sum("otherTokens")],
+    ["Input", sum("inputTokens")],
+    ["Output", sum("outputTokens")],
+    ["Cached", sum("cachedTokens")]
+  ] as Array<[string, number]>).filter(([, value]) => value > 0);
+  return items.length ? (
+    <div class="usage-graph-breakdown" aria-label="Daily token usage breakdown">
+      {items.map(([label, value]) => <span key={label}><strong>{label}</strong> {formatUsageValue(value)}</span>)}
+    </div>
+  ) : null;
+}
+
+function buildDailyUsageSegments(point: CodexDailyUsageBreakdown["points"][number]): UsageSegment[] {
+  const surfaceEntries = Object.entries(point.surfaceValues ?? {})
+    .filter(([, value]) => Number.isFinite(value) && value > 0)
+    .map(([key, value], index) => ({ key: formatUsageSurfaceLabel(key), used: value, color: USAGE_GRAPH_COLORS[index % USAGE_GRAPH_COLORS.length] ?? "#58a6ff" }));
+  if (surfaceEntries.length) return surfaceEntries;
+  const fallback = [
+    ["Input", point.inputTokens], ["Output", point.outputTokens], ["Cached", point.cachedTokens]
+  ] as Array<[string, number | undefined]>;
+  const segments = fallback.filter(([, value]) => typeof value === "number" && value > 0).map(([key, value], index) => ({ key, used: value as number, color: USAGE_GRAPH_COLORS[index % USAGE_GRAPH_COLORS.length] ?? "#58a6ff" }));
+  return segments.length ? segments : [{ key: "Total", used: point.totalTokens, color: USAGE_GRAPH_COLORS[0] ?? "#58a6ff" }];
+}
+
+function formatUsageSurfaceLabel(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "vscode" || normalized === "vs_code" || normalized === "visual_studio_code") return "Visual Studio Code";
+  if (normalized === "work" || normalized === "chatgpt") return normalized === "work" ? "Work" : "ChatGPT";
+  if (normalized === "codex" || normalized === "cli") return "Codex CLI";
+  return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function selectUsageHistoryWindow(
@@ -930,10 +979,21 @@ function aggregateUsageEvents(
     const bucket = Math.max(0, Math.min(bucketCount - 1, Math.floor((event.at - graphStartAt) / bucketDuration)));
     const key = `${event.accountId}:${bucket}`;
     const current = grouped.get(key);
+    const mergedSegments = [...(current?.segments ?? []), ...(event.segments ?? [])];
+    const segmentTotals = new Map<string, UsageSegment>();
+    for (const segment of mergedSegments) {
+      const previous = segmentTotals.get(segment.key);
+      segmentTotals.set(segment.key, {
+        key: segment.key,
+        used: (previous?.used ?? 0) + segment.used,
+        color: previous?.color ?? segment.color
+      });
+    }
     grouped.set(key, {
       at: current ? Math.max(current.at, event.at) : event.at,
       accountId: event.accountId,
-      used: (current?.used ?? 0) + event.used
+      used: (current?.used ?? 0) + event.used,
+      segments: segmentTotals.size ? [...segmentTotals.values()] : undefined
     });
   }
   return [...grouped.values()].sort((left, right) => left.at - right.at);

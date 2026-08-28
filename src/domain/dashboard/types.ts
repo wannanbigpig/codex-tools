@@ -12,6 +12,7 @@ export type DashboardSettingKey =
   | "codexAppRestartEnabled"
   | "codexAppRestartMode"
   | "backgroundTokenRefreshEnabled"
+  | "cliIntegrationEnabled"
   | "autoResumeCodexSessions"
   | "autoRefreshMinutes"
   | "autoRefreshCurrentMinutes"
@@ -36,6 +37,8 @@ export interface DashboardSettings {
   codexAppRestartEnabled: boolean;
   codexAppRestartMode: "auto" | "manual";
   backgroundTokenRefreshEnabled: boolean;
+  /** Master gate for local Codex CLI session access and auto-resume. */
+  cliIntegrationEnabled?: boolean;
   autoResumeCodexSessions: boolean;
   autoRefreshMinutes: number;
   autoRefreshCurrentMinutes: number;
@@ -493,6 +496,8 @@ export type DashboardActionName =
   | "setAccountTokenRefreshEnabled"
   | "refreshToken"
   | "getDailyUsage"
+  | "listCodexCliSessions"
+  | "getCodexCliSessionMessages"
   | "getResetCredits"
   | "consumeResetCredit";
 
@@ -521,6 +526,21 @@ export interface DashboardActionPayload {
   tokenRefreshEnabled?: boolean;
   enabled?: boolean;
   days?: number;
+  sessionId?: string;
+}
+
+export interface DashboardCliSessionSummary {
+  id: string;
+  title: string;
+  updatedAt?: string;
+  status: "running" | "idle";
+}
+
+export interface DashboardCliSessionMessage {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  timestamp?: string;
 }
 
 export interface DashboardActionResultPayload {
@@ -537,6 +557,9 @@ export interface DashboardActionResultPayload {
   restoredCount?: number;
   resetCredits?: import("../../core/types").CodexResetCreditsSnapshot;
   dailyUsage?: CodexDailyUsageBreakdown;
+  cliSessions?: DashboardCliSessionSummary[];
+  cliSession?: DashboardCliSessionSummary;
+  cliSessionMessages?: DashboardCliSessionMessage[];
 }
 
 export interface DashboardNotice {
