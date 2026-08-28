@@ -22,8 +22,10 @@ import {
 
 const WEB_DASHBOARD_PORT = 39875;
 const PASSWORD_SECRET_KEY = "codexAccounts.webDashboard.passwordHash.v1";
+const SESSION_SECRET_KEY = "codexAccounts.webDashboard.sessions.v1";
 const SESSION_COOKIE = "codex_dashboard_session";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const MAX_PERSISTED_SESSIONS = 16;
 const MAX_LOGIN_ATTEMPTS = 8;
 const LOGIN_WINDOW_MS = 5 * 60 * 1000;
 const MAX_DASHBOARD_MESSAGE_BYTES = 2 * 1024 * 1024;
@@ -154,7 +156,7 @@ export class WebDashboardServer implements vscode.Disposable {
     }
     if (!value) {
       await this.context.secrets.delete(PASSWORD_SECRET_KEY);
-      this.sessions.clear();
+      await this.clearSessions();
       void vscode.window.showInformationMessage("Web Dashboard password removed.");
       return;
     }
@@ -167,7 +169,7 @@ export class WebDashboardServer implements vscode.Disposable {
       );
       return;
     }
-    this.sessions.clear();
+    await this.clearSessions();
     void vscode.window.showInformationMessage("Web Dashboard password updated.");
   }
 
@@ -255,7 +257,7 @@ export class WebDashboardServer implements vscode.Disposable {
       return;
     }
     const token = crypto.randomBytes(32).toString("hex");
-    this.sessions.set(token, now + SESSION_TTL_MS);
+    await this.rememberSession(token, now + SESSION_TTL_MS);
     response.statusCode = 303;
     const secure = isForwardedHttpsRequest(request) ? "; Secure" : "";
     response.setHeader(
@@ -276,12 +278,38 @@ export class WebDashboardServer implements vscode.Disposable {
       .find((item) => item.startsWith(`${SESSION_COOKIE}=`))
       ?.split("=")[1];
     if (!token) return false;
-    const expiresAt = this.sessions.get(token);
+    let expiresAt = this.sessions.get(token);
+    if (!expiresAt) {
+      const persisted = normalizePersistedWebDashboardSessions(
+        await this.context.secrets.get(SESSION_SECRET_KEY),
+        Date.now()
+      );
+      const fingerprint = fingerprintWebDashboardSession(token);
+      expiresAt = persisted.find((session) => session.fingerprint === fingerprint)?.expiresAt;
+      if (expiresAt) {
+        this.sessions.set(token, expiresAt);
+      }
+    }
     if (!expiresAt || expiresAt <= Date.now()) {
       this.sessions.delete(token);
       return false;
     }
     return true;
+  }
+
+  private async rememberSession(token: string, expiresAt: number): Promise<void> {
+    this.sessions.set(token, expiresAt);
+    const sessions = normalizePersistedWebDashboardSessions(
+      await this.context.secrets.get(SESSION_SECRET_KEY),
+      Date.now()
+    ).filter((session) => session.fingerprint !== fingerprintWebDashboardSession(token));
+    sessions.push({ fingerprint: fingerprintWebDashboardSession(token), expiresAt });
+    await this.context.secrets.store(SESSION_SECRET_KEY, JSON.stringify(sessions.slice(-MAX_PERSISTED_SESSIONS)));
+  }
+
+  private async clearSessions(): Promise<void> {
+    this.sessions.clear();
+    await this.context.secrets.delete(SESSION_SECRET_KEY);
   }
 
   private async sendState(response: http.ServerResponse): Promise<void> {
@@ -404,6 +432,41 @@ export class WebDashboardServer implements vscode.Disposable {
 }
 
 class RequestBodyTooLargeError extends Error {}
+
+export interface PersistedWebDashboardSession {
+  fingerprint: string;
+  expiresAt: number;
+}
+
+export function fingerprintWebDashboardSession(token: string): string {
+  return crypto.createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+export function normalizePersistedWebDashboardSessions(
+  value: string | undefined,
+  now = Date.now()
+): PersistedWebDashboardSession[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is PersistedWebDashboardSession => {
+        if (!item || typeof item !== "object") return false;
+        const candidate = item as Partial<PersistedWebDashboardSession>;
+        return (
+          typeof candidate.fingerprint === "string" &&
+          /^[a-f0-9]{64}$/.test(candidate.fingerprint) &&
+          typeof candidate.expiresAt === "number" &&
+          Number.isFinite(candidate.expiresAt) &&
+          candidate.expiresAt > now
+        );
+      })
+      .slice(-MAX_PERSISTED_SESSIONS);
+  } catch {
+    return [];
+  }
+}
 
 export function readDashboardRequestBody(request: http.IncomingMessage, maxBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {

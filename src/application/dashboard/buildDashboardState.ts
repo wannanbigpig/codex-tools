@@ -312,6 +312,19 @@ export function buildMetrics(
     visible: quota ? Boolean(quota.weeklyWindowPresent) : true
   });
 
+  if (quota?.codeReviewWindowPresent || quota?.codeReviewPercentage !== undefined) {
+    metrics.push({
+      key: "review",
+      label: copy.reviewLabel,
+      period: "weekly",
+      percentage: quota.codeReviewPercentage,
+      resetAt: quota.codeReviewResetTime,
+      requestsLeft: quota.codeReviewRequestsLeft,
+      requestsLimit: quota.codeReviewRequestsLimit,
+      visible: Boolean(quota.codeReviewWindowPresent)
+    });
+  }
+
   for (const [index, limit] of quota?.additionalRateLimits?.entries() ?? []) {
     if (limit.hourlyWindowPresent) {
       metrics.push({

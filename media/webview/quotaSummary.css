@@ -264,98 +264,6 @@ html[data-theme="auto"] body.vscode-light .settings-theme-option.active {
   gap: 8px;
 }
 
-.overview-quota-notice {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 9px 10px;
-  border: 1px solid color-mix(in srgb, var(--accent-orange) 62%, var(--border-default));
-  border-radius: 12px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-orange) 14%, transparent), var(--bg-elevated));
-}
-
-.overview-quota-notice-copy,
-.overview-quota-notice-actions {
-  display: flex;
-  align-items: center;
-}
-
-.overview-quota-notice-copy {
-  min-width: 0;
-  gap: 8px;
-}
-
-.overview-quota-notice-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--accent-orange) 22%, var(--bg-surface));
-  color: var(--accent-orange);
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.overview-quota-notice-title {
-  color: var(--text-primary);
-  font-size: 10px;
-  font-weight: 800;
-}
-
-.overview-quota-notice-sub {
-  margin-top: 2px;
-  color: var(--text-secondary);
-  font-size: 9px;
-  line-height: 1.3;
-}
-
-.overview-quota-notice-actions {
-  flex: 0 0 auto;
-  gap: 5px;
-}
-
-.overview-quota-notice-btn {
-  min-height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--border-default);
-  border-radius: 8px;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.overview-quota-notice-btn.is-reset {
-  border-color: color-mix(in srgb, var(--accent-orange) 60%, var(--border-default));
-  background: color-mix(in srgb, var(--accent-orange) 20%, var(--bg-surface));
-  color: var(--accent-orange);
-}
-
-.overview-quota-notice-btn.is-switch {
-  background: var(--gradient-blue);
-  border-color: transparent;
-  color: #f7fbff;
-}
-
-.overview-quota-notice-btn:hover:not(:disabled),
-.overview-quota-notice-btn:focus-visible {
-  filter: brightness(1.08);
-  outline: none;
-}
-
-@media (max-width: 560px) {
-  .overview-quota-notice {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .overview-quota-notice-actions > button {
-    flex: 1 1 0;
-  }
-}
 .overview-empty-panel {
   align-content: center;
   justify-items: start;
@@ -4645,7 +4553,7 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
 
 .oauth-launch-panel {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 8px;
@@ -4660,49 +4568,6 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
 .oauth-launch-actions {
   display: flex;
   align-items: center;
-}
-
-.oauth-link-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin: 0 2px;
-  color: var(--text-secondary);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.oauth-link-status-dot {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--muted);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--muted) 16%, transparent);
-}
-
-.oauth-link-status.is-ready {
-  color: var(--accent-green, #3fb950);
-}
-
-.oauth-link-status.is-ready .oauth-link-status-dot {
-  background: var(--accent-green, #3fb950);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-green, #3fb950) 18%, transparent);
-}
-
-.oauth-link-status.is-loading .oauth-link-status-dot {
-  animation: oauth-status-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes oauth-status-pulse {
-  0%,
-  100% {
-    opacity: 0.45;
-  }
-  50% {
-    opacity: 1;
-  }
 }
 
 .oauth-launch-actions {
@@ -4724,6 +4589,7 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
 
 .account-add-popover .oauth-copy-btn,
 .account-add-popover .oauth-open-btn,
+.account-add-popover .oauth-create-link-btn,
 .account-add-popover .oauth-callback-row .modal-secondary-btn,
 .account-add-popover .modal-import-current-btn {
   min-height: 30px;
@@ -4732,6 +4598,59 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
 
 .account-add-popover .oauth-open-btn {
   min-width: 0;
+}
+
+.account-add-popover .oauth-create-link-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.account-info-modal {
+  width: min(520px, calc(100vw - 28px));
+}
+
+.account-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.account-info-row {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+}
+
+.account-info-label {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.account-info-value {
+  display: block;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-info-value.is-mono {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+@media (max-width: 520px) {
+  .account-info-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .account-add-popover .oauth-copy-btn {
@@ -5350,10 +5269,17 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
 }
 
 .account-count-badges .header-count-badge.is-active,
+.account-count-badges .header-count-badge.is-enabled,
 .account-count-badges .header-count-badge.is-valid {
   border-color: color-mix(in srgb, var(--accent-green) 48%, var(--border-default));
   background: color-mix(in srgb, var(--accent-green) 12%, transparent);
   color: var(--accent-green);
+}
+
+.account-count-badges .header-count-badge.is-disabled {
+  border-color: color-mix(in srgb, var(--accent-orange) 48%, var(--border-default));
+  background: color-mix(in srgb, var(--accent-orange) 12%, transparent);
+  color: var(--accent-orange);
 }
 
 .account-count-badges .header-count-badge.is-invalid {
@@ -5571,7 +5497,8 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
 }
 
 .usage-graph-ranges button,
-.usage-graph-navigation button {
+.usage-graph-navigation button,
+.usage-graph-ranges select {
   min-width: 25px;
   height: 20px;
   padding: 0 5px;
@@ -5585,10 +5512,94 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
   cursor: pointer;
 }
 
+.usage-graph-ranges select {
+  min-width: 58px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 8px;
+  font-weight: 700;
+}
+
 .usage-graph-ranges button.active {
   border-color: var(--accent-blue);
   background: color-mix(in srgb, var(--accent-blue) 18%, var(--bg-surface));
   color: var(--text-primary);
+}
+
+.usage-graph-settings-wrap {
+  position: relative;
+}
+
+.usage-graph-settings-wrap > button {
+  min-width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+}
+
+.usage-graph-settings-wrap > button.active {
+  border-color: var(--accent-blue);
+  color: var(--text-primary);
+}
+
+.usage-graph-settings-popover {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 5px);
+  right: 0;
+  display: grid;
+  min-width: 145px;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid var(--border-accent);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+}
+
+.usage-graph-settings-popover strong {
+  padding: 2px 4px 4px;
+  color: var(--text-secondary);
+  font-size: 9px;
+}
+
+.usage-graph-settings-popover button {
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 9px;
+  text-align: left;
+}
+
+.usage-graph-settings-popover button.active,
+.usage-graph-settings-popover button:hover:not(:disabled) {
+  border-color: var(--border-default);
+  background: var(--bg-surface);
+}
+
+.usage-graph-settings-popover button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.usage-graph-settings-error {
+  max-width: 190px;
+  padding: 3px 4px;
+  color: var(--accent-red);
+  font-size: 9px;
 }
 
 .usage-graph-navigation button {
@@ -7145,6 +7156,41 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
 .usage-graph-bar:focus {
   opacity: 1;
   transform: scaleY(1.04);
+}
+
+.usage-graph-tooltip {
+  position: absolute;
+  z-index: 8;
+  display: grid;
+  gap: 2px;
+  min-width: 112px;
+  max-width: 210px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+  font-size: 10px;
+  line-height: 1.25;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+}
+
+.usage-graph-tooltip strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-graph-tooltip span {
+  color: var(--accent-orange);
+  font-weight: 800;
+}
+
+.usage-graph-tooltip time {
+  color: var(--text-secondary);
+  font-size: 9px;
 }
 
 .usage-graph-empty {

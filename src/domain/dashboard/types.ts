@@ -1,6 +1,7 @@
 import type { DashboardLanguage, DashboardLanguageOption } from "../../localization/languages";
 import type {
   CodexAnnouncementState,
+  CodexDailyUsageBreakdown,
   CodexImportPreviewSummary,
   CodexImportResultSummary,
   CodexIndexHealthSummary
@@ -484,6 +485,7 @@ export type DashboardActionName =
   | "setAccountQueuePriority"
   | "setAccountTokenRefreshEnabled"
   | "refreshToken"
+  | "getDailyUsage"
   | "getResetCredits"
   | "consumeResetCredit";
 
@@ -511,6 +513,7 @@ export interface DashboardActionPayload {
   queuePriority?: boolean;
   tokenRefreshEnabled?: boolean;
   enabled?: boolean;
+  days?: number;
 }
 
 export interface DashboardActionResultPayload {
@@ -526,6 +529,7 @@ export interface DashboardActionResultPayload {
   email?: string;
   restoredCount?: number;
   resetCredits?: import("../../core/types").CodexResetCreditsSnapshot;
+  dailyUsage?: CodexDailyUsageBreakdown;
 }
 
 export interface DashboardNotice {

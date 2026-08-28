@@ -869,14 +869,18 @@ describe("quota warning window validation", () => {
     const showWarning = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(undefined);
     showWarning.mockClear();
     const account = createAccount("active", true, 0, 5);
-    const repo = { getAccount: vi.fn(async () => account) };
+    const target = createAccount("recommended", false, 90, 85);
+    const repo = {
+      getAccount: vi.fn(async () => account),
+      listAccounts: vi.fn(async () => [account, target])
+    };
 
     await maybeWarnForAccount(repo as unknown as AccountsRepository, account.id);
 
     expect(showWarning).toHaveBeenCalledTimes(1);
     expect(showWarning.mock.calls[0]?.[0]).toContain("5%");
     expect(showWarning.mock.calls[0]?.slice(1)).toEqual([
-      "Switch active@example.com",
+      "Switch recommended@example.com",
       "Select Account",
       "Later"
     ]);
@@ -896,13 +900,16 @@ describe("quota warning window validation", () => {
     vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue("Select Account" as never);
     const executeCommand = vi.spyOn(vscode.commands, "executeCommand").mockResolvedValue(undefined);
     const account = createAccount("select-account-action", true, 80, 5);
-    const repo = { getAccount: vi.fn(async () => account) };
+    const repo = {
+      getAccount: vi.fn(async () => account),
+      listAccounts: vi.fn(async () => [account])
+    };
 
     await maybeWarnForAccount(repo as unknown as AccountsRepository, account.id);
     await vi.waitFor(() => expect(executeCommand).toHaveBeenCalledWith("codexAccounts.switchAccount"));
   });
 
-  it("runs one-time automatic selection when the account-specific Switch action is chosen", async () => {
+  it("switches directly to the recommended account named by the Switch action", async () => {
     vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue({
       get: vi.fn((key: string, defaultValue?: unknown) => {
         const values: Record<string, unknown> = {
@@ -913,21 +920,25 @@ describe("quota warning window validation", () => {
         return values[key] ?? defaultValue;
       })
     } as never);
-    vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue("Switch auto-select-action@example.com" as never);
+    vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue("Switch recommended-action@example.com" as never);
     const executeCommand = vi.spyOn(vscode.commands, "executeCommand").mockResolvedValue(undefined);
     const account = createAccount("auto-select-action", true, 80, 5);
-    const repo = { getAccount: vi.fn(async () => account) };
+    const target = createAccount("recommended-action", false, 95, 85);
+    const repo = {
+      getAccount: vi.fn(async () => account),
+      listAccounts: vi.fn(async () => [account, target])
+    };
 
     await maybeWarnForAccount(repo as unknown as AccountsRepository, account.id);
-    await vi.waitFor(() => expect(executeCommand).toHaveBeenCalledWith("codexAccounts.autoSelectAccount"));
+    await vi.waitFor(() => expect(executeCommand).toHaveBeenCalledWith("codexAccounts.switchAccount", target));
   });
 
-  it("places Reset for the warned account before Select Account when a reset is available", async () => {
+  it("shows weekly quota in a 5h warning with Reset and the recommended switch target", async () => {
     vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue({
       get: vi.fn((key: string, defaultValue?: unknown) => {
         const values: Record<string, unknown> = {
           quotaWarningEnabled: true,
-          hourlyQuotaControlEnabled: false,
+          hourlyQuotaControlEnabled: true,
           quotaWarningThreshold: 10
         };
         return values[key] ?? defaultValue;
@@ -938,14 +949,20 @@ describe("quota warning window validation", () => {
     );
     showWarning.mockClear();
     const executeCommand = vi.spyOn(vscode.commands, "executeCommand").mockResolvedValue(undefined);
-    const account = createAccount("reset-action", true, 80, 5);
+    const account = createAccount("reset-action", true, 6, 95);
     account.quotaSummary!.resetCreditsAvailable = 1;
-    const repo = { getAccount: vi.fn(async () => account) };
+    const target = createAccount("reset-target", false, 80, 90);
+    const repo = {
+      getAccount: vi.fn(async () => account),
+      listAccounts: vi.fn(async () => [account, target])
+    };
 
     await maybeWarnForAccount(repo as unknown as AccountsRepository, account.id);
 
+    expect(showWarning.mock.calls[0]?.[0]).toContain("Weekly: 95%");
+    expect(showWarning.mock.calls[0]?.[0]).toContain("Reset");
     expect(showWarning.mock.calls[0]?.slice(1)).toEqual([
-      "Switch reset-action@example.com",
+      "Switch reset-target@example.com",
       "Reset reset-action@example.com",
       "Select Account",
       "Later"
@@ -973,7 +990,10 @@ describe("quota warning window validation", () => {
       account.quotaSummary.hourlyWindowPresent = false;
       account.quotaSummary.weeklyWindowPresent = false;
     }
-    const repo = { getAccount: vi.fn(async () => account) };
+    const repo = {
+      getAccount: vi.fn(async () => account),
+      listAccounts: vi.fn(async () => [account])
+    };
 
     await maybeWarnForAccount(repo as unknown as AccountsRepository, account.id);
 

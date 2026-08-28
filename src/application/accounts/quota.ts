@@ -509,6 +509,7 @@ export async function maybeWarnForAccount(repo: AccountsRepository, accountId: s
   }
 
   const copy = getQuotaWarningCopy();
+  const accounts = await repo.listAccounts();
   if (!hourlyQuotaControlEnabled) {
     clearQuotaWarningCountsForDimension("hourly");
   }
@@ -548,20 +549,31 @@ export async function maybeWarnForAccount(repo: AccountsRepository, accountId: s
 
     quotaWarningCounts.set(warnKey, warningCount + 1);
     const accountLabel = account.email;
-    const switchAccount = copy.switchAccount(accountLabel);
+    const switchTarget = selectQuotaWarningSwitchTarget(accounts, account, check.dimension, threshold);
+    const switchAccount = switchTarget
+      ? copy.switchAccount(formatAccountToastLabel(switchTarget))
+      : undefined;
     const resetAccount = copy.resetAccount(accountLabel);
     const resetAvailable = (account.quotaSummary.resetCreditsAvailable ?? 0) > 0;
-    const actions = resetAvailable
-      ? [switchAccount, resetAccount, copy.selectAccount, copy.later]
-      : [switchAccount, copy.selectAccount, copy.later];
+    const actions = [
+      ...(switchAccount ? [switchAccount] : []),
+      ...(resetAvailable ? [resetAccount] : []),
+      copy.selectAccount,
+      copy.later
+    ];
+    const warningMessage =
+      copy.message(accountLabel, check.label, check.value, threshold) +
+      (resetAvailable && check.dimension !== "weekly" && hasComparableWeeklyWindow(account)
+        ? ` ${copy.resetAvailableSummary(copy.weeklyLabel, account.quotaSummary.weeklyPercentage)}`
+        : "");
     void vscode.window
       .showWarningMessage(
-        copy.message(accountLabel, check.label, check.value, threshold),
+        warningMessage,
         ...actions
       )
       .then((selection) => {
-        if (selection === switchAccount) {
-          void vscode.commands.executeCommand("codexAccounts.autoSelectAccount");
+        if (switchAccount && switchTarget && selection === switchAccount) {
+          void vscode.commands.executeCommand("codexAccounts.switchAccount", switchTarget);
         } else if (selection === resetAccount) {
           void vscode.commands.executeCommand("codexAccounts.consumeResetCredit", account);
         } else if (selection === copy.selectAccount) {
@@ -569,6 +581,24 @@ export async function maybeWarnForAccount(repo: AccountsRepository, accountId: s
         }
       });
   }
+}
+
+export function selectQuotaWarningSwitchTarget(
+  accounts: CodexAccountRecord[],
+  active: CodexAccountRecord,
+  dimension: "hourly" | "weekly",
+  threshold: number
+): CodexAccountRecord | undefined {
+  return accounts
+    .filter((candidate) => {
+      if (candidate.id === active.id || candidate.isActive || candidate.enabled === false) return false;
+      if (!candidate.quotaSummary || candidate.quotaError) return false;
+      if (dimension === "hourly") {
+        return hasComparableHourlyWindow(candidate) && candidate.quotaSummary.hourlyPercentage > threshold;
+      }
+      return hasComparableWeeklyWindow(candidate) && candidate.quotaSummary.weeklyPercentage > threshold;
+    })
+    .sort(compareAutoSwitchCandidate)[0];
 }
 
 function clearQuotaWarningCountsForDimension(dimension: "hourly" | "weekly"): void {

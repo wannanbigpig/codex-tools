@@ -8,6 +8,8 @@ import {
 import {
   isAddressInUseError,
   isForwardedHttpsRequest,
+  fingerprintWebDashboardSession,
+  normalizePersistedWebDashboardSessions,
   WebDashboardServer
 } from "../src/services/webDashboardServer";
 
@@ -31,6 +33,23 @@ describe("Web Dashboard password", () => {
     expect(isAddressInUseError(Object.assign(new Error("busy"), { code: "EADDRINUSE" }))).toBe(true);
     expect(isAddressInUseError(Object.assign(new Error("denied"), { code: "EACCES" }))).toBe(false);
     expect(isAddressInUseError("EADDRINUSE")).toBe(false);
+  });
+
+  it("persists only valid, unexpired session fingerprints", () => {
+    const token = "opaque-session-token";
+    const fingerprint = fingerprintWebDashboardSession(token);
+    const sessions = normalizePersistedWebDashboardSessions(
+      JSON.stringify([
+        { fingerprint, expiresAt: 2_000 },
+        { fingerprint: token, expiresAt: 2_000 },
+        { fingerprint, expiresAt: 500 },
+        { fingerprint: "bad", expiresAt: 2_000 }
+      ]),
+      1_000
+    );
+
+    expect(sessions).toEqual([{ fingerprint, expiresAt: 2_000 }]);
+    expect(fingerprint).toMatch(/^[a-f0-9]{64}$/);
   });
 });
 

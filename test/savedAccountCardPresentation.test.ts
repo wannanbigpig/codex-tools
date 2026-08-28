@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "fs";
 import {
   resolveCardHealthReason,
   resolveCompactIdentityBadge,
@@ -28,5 +29,10 @@ describe("saved account card presentation", () => {
         healthMessage: 'API returned 401 - {"error":"Your authentication token has expired"}'
       })
     ).toBe("Needs Reauth");
+  });
+
+  it("opens account details in the details pane instead of flipping the card", () => {
+    const source = readFileSync("webview-src/dashboard/savedAccountCard.tsx", "utf8");
+    expect(source).toContain('onAction("details", account.id, { privacyMode: props.privacyMode })');
   });
 });

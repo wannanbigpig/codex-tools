@@ -9,6 +9,7 @@ import type {
   DashboardNotice,
   DashboardUsageSample
 } from "../../src/domain/dashboard/types";
+import type { CodexDailyUsageBreakdown } from "../../src/core/types";
 import { AnnouncementCenter } from "./announcementCenter";
 import { BatchSelectionBar, OverviewSection, RecoveryPanel } from "./components";
 import { postMessageToHost } from "./host";
@@ -17,7 +18,13 @@ import {
   hasDashboardAutoQueueCapability,
   sortWithQueuedAccount
 } from "./accountSorting";
-import { isAccountAttention, normalizeThresholds, resolveBrandSubtitle, resolveOverviewAccount } from "./helpers";
+import {
+  countAccountEnablement,
+  isAccountAttention,
+  normalizeThresholds,
+  resolveBrandSubtitle,
+  resolveOverviewAccount
+} from "./helpers";
 import { useDashboardActions, useDashboardHostSync, useDashboardModals } from "./hooks";
 import {
   BellIcon,
@@ -29,7 +36,14 @@ import {
   InfoIcon,
   TableViewIcon
 } from "./icons";
-import { AboutModal, AddAccountModal, ConfirmCancelOauthModal, SettingsOverlay, ShareTokenModal } from "./panels";
+import {
+  AboutModal,
+  AccountInfoModal,
+  AddAccountModal,
+  ConfirmCancelOauthModal,
+  SettingsOverlay,
+  ShareTokenModal
+} from "./panels";
 import { SavedAccountCard } from "./savedAccountCard";
 import { createInitialState, reducer } from "./state";
 import { resolveDashboardThemeFromMedia } from "./theme";
@@ -43,16 +57,17 @@ const USAGE_HISTORY_STORAGE_KEY = "codexAccounts.dashboardUsageHistory.v1";
 const DAY_MS = 24 * 60 * 60 * 1000;
 type AccountSort =
   | "auto-queue"
-  | "balance-desc"
-  | "balance-asc"
-  | "next-reset"
+  | "quota"
+  | "time-left"
+  | "login-date"
+  | "account-type"
   | "subscription-expiry"
   | "name"
   | "last-refresh"
   | "status";
-type AccountFilter = "all" | "healthy" | "attention" | "low" | "active";
+type AccountFilter = "all" | "healthy" | "attention" | "low" | "active" | "enabled" | "disabled";
 type DashboardView = "cards" | "list";
-type MetricPriority = "weekly" | "hourly" | "review";
+type MetricPriority = string;
 type UiPreferences = {
   filter: AccountFilter;
   view: DashboardView;
@@ -68,9 +83,10 @@ const DEFAULT_UI_PREFERENCES: UiPreferences = {
 function isAccountSort(value: string | null): value is AccountSort {
   return (
     value === "auto-queue" ||
-    value === "balance-desc" ||
-    value === "balance-asc" ||
-    value === "next-reset" ||
+    value === "quota" ||
+    value === "time-left" ||
+    value === "login-date" ||
+    value === "account-type" ||
     value === "subscription-expiry" ||
     value === "name" ||
     value === "last-refresh" ||
@@ -86,6 +102,8 @@ function App() {
   const [accountSort, setAccountSort] = useState<AccountSort>(() => {
     try {
       const stored = window.localStorage.getItem(ACCOUNT_SORT_STORAGE_KEY);
+      if (stored === "balance-desc") return "quota";
+      if (stored === "next-reset") return "time-left";
       return isAccountSort(stored) ? stored : "auto-queue";
     } catch {
       return "auto-queue";
@@ -97,6 +115,9 @@ function App() {
   const [tagFilterOpen, setTagFilterOpen] = useState(false);
   const [shareExportCount, setShareExportCount] = useState(0);
   const [usageHistory, setUsageHistory] = useState<DashboardUsageSample[]>(loadUsageHistory);
+  const [accountInfoAccountId, setAccountInfoAccountId] = useState<string>();
+  const [dailyUsageByAccount, setDailyUsageByAccount] = useState<Record<string, CodexDailyUsageBreakdown>>({});
+  const [dailyUsageErrorByAccount, setDailyUsageErrorByAccount] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<DashboardNotice>();
   const showNotice = useCallback((next: DashboardNotice) => setNotice(next), []);
   const lastTerminalNoticeAtRef = useRef<number>();
@@ -115,7 +136,24 @@ function App() {
     isBrowserDashboard
   });
   useDashboardHostSync({
-    handleHostMessage: modals.handleHostMessage,
+    handleHostMessage: (message) => {
+      modals.handleHostMessage(message);
+      if (message.type === "dashboard:action-result" && message.action === "getDailyUsage" && message.accountId) {
+        if (message.status === "completed" && message.payload?.dailyUsage) {
+          setDailyUsageByAccount((current) => ({ ...current, [message.accountId!]: message.payload!.dailyUsage! }));
+          setDailyUsageErrorByAccount((current) => {
+            const next = { ...current };
+            delete next[message.accountId!];
+            return next;
+          });
+        } else if (message.status === "failed") {
+          setDailyUsageErrorByAccount((current) => ({
+            ...current,
+            [message.accountId!]: message.error ?? "Daily usage could not be loaded."
+          }));
+        }
+      }
+    },
     handleEscape: () => modals.handleEscape(isActionPending("completeOAuthSession"))
   });
   useEffect(() => {
@@ -261,6 +299,9 @@ function App() {
   }
 
   const overviewAccount = resolveOverviewAccount(snapshot.accounts);
+  const accountInfoAccount = accountInfoAccountId
+    ? snapshot.accounts.find((account) => account.id === accountInfoAccountId)
+    : undefined;
   const availableTags = useMemo(
     () =>
       [...new Set(snapshot.accounts.flatMap((account) => account.tags))].sort((left, right) =>
@@ -375,6 +416,7 @@ function App() {
   );
   const invalidAccountCount = snapshot.accounts.filter(isAccountAttention).length;
   const validAccountCount = snapshot.accounts.length - invalidAccountCount;
+  const accountEnablement = countAccountEnablement(snapshot.accounts);
   const weeklyPercentages = snapshot.accounts
     .map(
       (account) =>
@@ -390,6 +432,14 @@ function App() {
   const weeklyQuotaPercent = weeklyPercentages.length
     ? Math.round(weeklyPercentages.reduce((sum, value) => sum + value, 0) / weeklyPercentages.length)
     : undefined;
+  const availableMetrics = Array.from(
+    new Map(
+      snapshot.accounts
+        .flatMap((account) => account.metrics)
+        .filter((metric) => metric.visible)
+        .map((metric) => [metric.key, metric])
+    ).values()
+  );
 
   const handleShareTokens = (): void => {
     if (!selectedCount) {
@@ -409,6 +459,10 @@ function App() {
     accountId?: string,
     payload?: DashboardActionPayload
   ): void => {
+    if (action === "details" && isBrowserDashboard && accountId) {
+      setAccountInfoAccountId(accountId);
+      return;
+    }
     if (action === "reauthorize" && accountId) {
       modals.openReauthorizeModal(accountId);
       return;
@@ -604,6 +658,12 @@ function App() {
               overviewAccount && isActionPending("consumeResetCredit", overviewAccount.id)
             )}
             metricPriority={uiPreferences.metricPriority}
+            dailyUsage={overviewAccount ? dailyUsageByAccount[overviewAccount.id] : undefined}
+            dailyUsagePending={Boolean(overviewAccount && isActionPending("getDailyUsage", overviewAccount.id))}
+            dailyUsageError={overviewAccount ? dailyUsageErrorByAccount[overviewAccount.id] : undefined}
+            onLoadDailyUsage={() => {
+              if (overviewAccount) sendAction("getDailyUsage", overviewAccount.id, { days: 30 });
+            }}
             usageHistory={usageHistory}
             onSetAutoSwitchLock={handleAutoSwitchLock}
             onAddAccount={modals.openAddAccountModal}
@@ -618,8 +678,8 @@ function App() {
             onConsumeResetCredit={() => {
               if (overviewAccount) sendAction("consumeResetCredit", overviewAccount.id);
             }}
-            onSwitchAccount={() => {
-              if (overviewAccount) sendAction("switch", overviewAccount.id);
+            onSwitchAccount={(accountId) => {
+              if (accountId) sendAction("switch", accountId);
             }}
             onReloadAccount={() => {
               if (overviewAccount) sendAction("reloadPrompt", overviewAccount.id);
@@ -642,6 +702,20 @@ function App() {
                       onClick={() => setUiPreferences((current) => ({ ...current, filter: "all" }))}
                     >
                       {resolveUiText("total", snapshot.lang)} {snapshot.accounts.length}
+                    </button>
+                    <button
+                      class="header-count-badge is-enabled header-count-link"
+                      type="button"
+                      onClick={() => setUiPreferences((current) => ({ ...current, filter: "enabled" }))}
+                    >
+                      {resolveUiText("enabled", snapshot.lang)} {accountEnablement.enabled}
+                    </button>
+                    <button
+                      class="header-count-badge is-disabled header-count-link"
+                      type="button"
+                      onClick={() => setUiPreferences((current) => ({ ...current, filter: "disabled" }))}
+                    >
+                      {resolveUiText("disabled", snapshot.lang)} {accountEnablement.disabled}
                     </button>
                     <button
                       class="header-count-badge is-valid header-count-link"
@@ -714,16 +788,7 @@ function App() {
                   aria-label={resolveSortAriaLabel(snapshot.lang)}
                 >
                   {(
-                    [
-                      "auto-queue",
-                      "balance-desc",
-                      "balance-asc",
-                      "next-reset",
-                      "subscription-expiry",
-                      "name",
-                      "last-refresh",
-                      "status"
-                    ] as AccountSort[]
+                    ["auto-queue", "quota", "time-left", "login-date", "last-refresh", "subscription-expiry", "account-type", "name", "status"] as AccountSort[]
                   ).map((sort) => (
                     <option key={sort} value={sort}>
                       {resolveSortOptionLabel(sort, snapshot.lang)}
@@ -742,9 +807,9 @@ function App() {
                     }))
                   }
                 >
-                  {(["weekly", "hourly", "review"] as MetricPriority[]).map((metric) => (
-                    <option key={metric} value={metric}>
-                      {resolveUiText(metric, snapshot.lang)}
+                  {availableMetrics.map((metric) => (
+                    <option key={metric.key} value={metric.key}>
+                      {metric.label}
                     </option>
                   ))}
                 </select>
@@ -881,6 +946,13 @@ function App() {
         onOpenExternal={(url) => sendAction("openExternalUrl", undefined, { url })}
       />
 
+      <AccountInfoModal
+        account={isBrowserDashboard ? accountInfoAccount : undefined}
+        lang={snapshot.lang}
+        closeLabel={snapshot.copy.closeModal}
+        onClose={() => setAccountInfoAccountId(undefined)}
+      />
+
       <AddAccountModal
         open={modals.addAccountModalOpen}
         tab={modals.addAccountTab}
@@ -902,6 +974,7 @@ function App() {
         importSharedPending={importSharedPending}
         onClose={() => modals.closeAddAccountModal(completeOAuthPending)}
         onSelectTab={modals.handleAddAccountTabChange}
+        onCreateOauthLink={modals.handlePrepareOauthLink}
         onCopyOauthLink={modals.handleCopyOauthLink}
         onOpenInBrowser={modals.handleStartOAuthAutoFlow}
         onOauthCallbackChange={modals.setOauthCallbackUrl}
@@ -950,6 +1023,9 @@ function sortAccounts(
         metric.key.includes(priority) &&
         typeof metric.percentage === "number" &&
         Number.isFinite(metric.percentage)
+    ) ??
+    account.metrics.find(
+      (metric) => metric.visible && typeof metric.percentage === "number" && Number.isFinite(metric.percentage)
     );
   const compareDefinedNumbers = (left: number | undefined, right: number | undefined, direction: 1 | -1): number => {
     if (left === undefined && right === undefined) return 0;
@@ -984,13 +1060,13 @@ function sortAccounts(
   ): number => {
     const quotaValue = (account: DashboardAccountViewModel, priority: MetricPriority): number | undefined =>
       metricFor(account, priority)?.percentage;
-    const valuesFor = (
-      account: DashboardAccountViewModel
-    ): [number | undefined, number | undefined, number | undefined] => {
-      const hourly = quotaValue(account, "hourly");
-      const weekly = quotaValue(account, "weekly");
-      const available = [hourly, weekly].filter((value): value is number => value !== undefined);
-      return [available.length ? Math.min(...available) : undefined, hourly, weekly];
+    const valuesFor = (account: DashboardAccountViewModel): Array<number | undefined> => {
+      const metrics = account.metrics
+        .filter((metric) => metric.visible && typeof metric.percentage === "number" && Number.isFinite(metric.percentage))
+        .map((metric) => metric.percentage as number);
+      if (!metrics.length) return [undefined];
+      const preferred = quotaValue(account, metricPriority);
+      return [Math.min(...metrics), preferred, ...metrics];
     };
     const leftValues = valuesFor(left);
     const rightValues = valuesFor(right);
@@ -1009,14 +1085,20 @@ function sortAccounts(
     if (sort === "last-refresh") {
       return account.lastQuotaAt;
     }
+    if (sort === "login-date") {
+      return account.loginAt;
+    }
+    if (sort === "account-type") {
+      return account.accountStructureLabel.toLocaleLowerCase();
+    }
     if (sort === "status") {
       return ({ healthy: 0, expiring: 1, quota: 2, refresh_failed: 3, disabled: 4, reauthorize: 5 } as const)[
         account.healthKind
       ];
     }
-    if (sort === "next-reset") {
+    if (sort === "time-left") {
       const resetTimes = account.metrics
-        .filter((metric) => metric.visible && (metric.key.includes("hourly") || metric.key.includes("weekly")))
+        .filter((metric) => metric.visible)
         .map((metric) => metric.resetAt)
         .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
       return resetTimes.length ? Math.min(...resetTimes) : undefined;
@@ -1028,8 +1110,8 @@ function sortAccounts(
   };
 
   return sortWithQueuedAccount(accounts, (left, right) => {
-    if (sort === "balance-desc" || sort === "balance-asc") {
-      return compareQuotaBalance(left, right, sort);
+    if (sort === "quota") {
+      return compareQuotaBalance(left, right, "balance-desc");
     }
     const leftValue = valueFor(left);
     const rightValue = valueFor(right);
@@ -1043,7 +1125,7 @@ function sortAccounts(
       return -1;
     }
     const direction =
-      sort === "next-reset" || sort === "subscription-expiry" || sort === "status" || sort === "name" ? 1 : -1;
+      sort === "time-left" || sort === "login-date" || sort === "subscription-expiry" || sort === "status" || sort === "name" || sort === "account-type" ? 1 : -1;
     if (typeof leftValue === "string" && typeof rightValue === "string") {
       return direction * leftValue.localeCompare(rightValue);
     }
@@ -1137,7 +1219,9 @@ function filterAccounts(
       (filter === "healthy" && !attention) ||
       (filter === "attention" && attention) ||
       (filter === "low" && low) ||
-      (filter === "active" && account.isActive);
+      (filter === "active" && account.isActive) ||
+      (filter === "enabled" && account.enabled) ||
+      (filter === "disabled" && !account.enabled);
     const matchesTags = selectedTags.length === 0 || selectedTags.some((tag) => account.tags.includes(tag));
     return matchesQuery && matchesFilter && matchesTags;
   });
@@ -1254,6 +1338,8 @@ function resolveUiText(key: string, lang: string): string {
     active: zh ? "当前" : hant ? "目前" : "Current",
     valid: zh ? "有效" : hant ? "有效" : "Valid",
     invalid: zh ? "无效" : hant ? "無效" : "Invalid",
+    enabled: zh ? "已启用" : hant ? "已啟用" : "Enabled",
+    disabled: zh ? "已禁用" : hant ? "已停用" : "Disabled",
     weeklyShort: zh ? "周配额" : hant ? "週配額" : "Weekly",
     metric: zh ? "主指标" : hant ? "主指標" : "Metric",
     tags: zh ? "标签" : hant ? "標籤" : "Tags",
@@ -1292,9 +1378,10 @@ function resolveSortOptionLabel(sort: AccountSort, lang: string): string {
   const zh = lang === "zh";
   const hant = lang === "zh-hant";
   if (sort === "auto-queue") return zh ? "自动队列" : hant ? "自動佇列" : "Auto queue";
-  if (sort === "balance-desc") return zh ? "配额余额最高" : hant ? "配額餘額最高" : "Highest quota";
-  if (sort === "balance-asc") return zh ? "配额余额最低" : hant ? "配額餘額最低" : "Lowest quota";
-  if (sort === "next-reset") return zh ? "最快重置" : hant ? "最快重置" : "Next reset";
+  if (sort === "quota") return zh ? "配额" : hant ? "配額" : "Quota";
+  if (sort === "time-left") return zh ? "剩余时间" : hant ? "剩餘時間" : "Time left";
+  if (sort === "login-date") return zh ? "登录日期" : hant ? "登入日期" : "Login date";
+  if (sort === "account-type") return zh ? "账号类型" : hant ? "帳號類型" : "Account type";
   if (sort === "subscription-expiry") return zh ? "订阅即将到期" : hant ? "訂閱即將到期" : "Expiring soon";
   if (sort === "name") return zh ? "名称" : hant ? "名稱" : "Name";
   if (sort === "last-refresh") return zh ? "最近刷新" : hant ? "最近重新整理" : "Last refreshed";

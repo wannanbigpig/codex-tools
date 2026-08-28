@@ -75,7 +75,7 @@ export function SavedAccountCard(props: {
   consumeResetCreditPending: boolean;
   exportPending: boolean;
   selected: boolean;
-  metricPriority: "weekly" | "hourly" | "review";
+  metricPriority: string;
   compactRow?: boolean;
   onToggleSelected: () => void;
   onExportAuth: () => void;
@@ -569,13 +569,13 @@ export function SavedAccountCard(props: {
                   </button>
                   <button
                     type="button"
-                    disabled={props.busy}
+                    disabled={props.busy || props.detailsPending}
                     onClick={() => {
                       setActionsOpen(false);
                       onAction("details", account.id, { privacyMode });
                     }}
                   >
-                    {renderDetailsIcon()} <span>{infoLabel}</span>
+                    {props.detailsPending ? <span class="saved-toggle-spinner" aria-hidden="true"></span> : renderDetailsIcon()} <span>{infoLabel}</span>
                   </button>
                   <button
                     class="danger"
@@ -849,12 +849,13 @@ export function SavedAccountCard(props: {
                       </button>
                       <button
                         type="button"
+                        disabled={props.busy || props.detailsPending}
                         onClick={() => {
                           setActionsOpen(false);
-                          setFlipped(true);
+                          onAction("details", account.id, { privacyMode: props.privacyMode });
                         }}
                       >
-                        {renderDetailsIcon()} <span>{infoLabel}</span>
+                        {props.detailsPending ? <span class="saved-toggle-spinner" aria-hidden="true"></span> : renderDetailsIcon()} <span>{infoLabel}</span>
                       </button>
                       <button
                         class="danger"

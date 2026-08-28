@@ -6,11 +6,11 @@ import type {
   DashboardSettings,
   DashboardState
 } from "../../src/domain/dashboard/types";
+import type { CodexDailyUsageBreakdown } from "../../src/core/types";
 import type { DashboardUsageSample } from "../../src/domain/dashboard/types";
 import {
   formatRelativeTimestamp,
   formatTimestamp,
-  formatPercent,
   getSensitiveDisplayValue,
   renderTagList,
   resolveLockMinutes
@@ -18,7 +18,9 @@ import {
 import { formatAccountUsageDuration } from "../../src/utils/accountUsage";
 import { ActionButton } from "./primitives";
 import { MetricGauge } from "./accountMetricPrimitives";
-import { AccountAccessIcon, renderRefreshIcon, ResetCreditIcon } from "./icons";
+import { AccountAccessIcon, renderRefreshIcon, renderReloadIcon, renderSwitchIcon, ResetCreditIcon } from "./icons";
+import { compareDashboardAutoQueueAccounts, hasDashboardAutoQueueCapability } from "./accountSorting";
+import { canRunAccountOnThisPc } from "./accountRunPolicy";
 
 export type { DashboardUsageSample } from "../../src/domain/dashboard/types";
 
@@ -35,8 +37,12 @@ export function OverviewSection(props: {
   addPending: boolean;
   refreshAllPending: boolean;
   consumeResetCreditPending: boolean;
-  metricPriority?: "weekly" | "hourly" | "review";
+  metricPriority?: string;
   usageHistory?: DashboardUsageSample[];
+  dailyUsage?: CodexDailyUsageBreakdown;
+  dailyUsagePending?: boolean;
+  dailyUsageError?: string;
+  onLoadDailyUsage?: () => void;
   onSetAutoSwitchLock: (minutes: number) => void;
   onAddAccount: () => void;
   onRefreshAll: () => void;
@@ -46,7 +52,7 @@ export function OverviewSection(props: {
   registryOverridePending: boolean;
   onSetRegistryOverride: (enabled: boolean) => void;
   onConsumeResetCredit: () => void;
-  onSwitchAccount: () => void;
+  onSwitchAccount: (accountId?: string) => void;
   onReloadAccount: () => void;
   onRefreshQuota: () => void;
 }) {
@@ -58,8 +64,6 @@ export function OverviewSection(props: {
       ? getSensitiveDisplayValue(account.accountName, privacyMode, "name", account.accountName)
       : undefined;
   const hasResetCredit = (account?.resetCreditsAvailable ?? 0) > 0;
-  const weeklyMetric = account?.metrics.find((metric) => metric.key === "weekly" && metric.visible);
-  const showResetQuotaNotice = hasResetCredit && typeof weeklyMetric?.percentage === "number";
   const refreshMode = resolveOverviewRefreshMode(settings.encryptedSyncEnabled);
   const toolbarActionCount = resolveOverviewToolbarActionCount(
     hasAccounts,
@@ -69,26 +73,31 @@ export function OverviewSection(props: {
   const [lockDialogOpen, setLockDialogOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [lockMinutes, setLockMinutes] = useState(() => resolveLockMinutes(settings.autoSwitchLockMinutes));
-  const lockPopoverRef = useRef<HTMLDivElement>(null);
   const lockPopoverContentRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const morePopoverContentRef = useRef<HTMLDivElement>(null);
   const [lockPopoverPosition, setLockPopoverPosition] = useState({ top: 0, right: 0 });
   const [morePopoverPosition, setMorePopoverPosition] = useState({ top: 0, right: 0 });
-  useEffect(() => {
-    if (!lockDialogOpen) return;
-    const updatePosition = () => {
-      const rect = lockPopoverRef.current?.getBoundingClientRect();
-      if (rect) setLockPopoverPosition({ top: rect.bottom + 5, right: Math.max(8, window.innerWidth - rect.right) });
-    };
-    updatePosition();
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-    return () => {
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [lockDialogOpen]);
+  const switchTarget = account && props.accounts
+    ? props.accounts
+        .filter(
+          (candidate) =>
+            !candidate.isActive &&
+            hasDashboardAutoQueueCapability(candidate) &&
+            canRunAccountOnThisPc(candidate, props.disabled, settings.encryptedSyncRegistryOverrideEnabled)
+        )
+        .sort(compareDashboardAutoQueueAccounts)[0]
+    : undefined;
+  const contextAction = account
+    ? resolveOverviewContextAction(account, settings.encryptedSyncRegistryOverrideEnabled)
+    : "switch";
+  const openLockDialog = (trigger: HTMLElement): void => {
+    const rect = trigger.getBoundingClientRect();
+    setLockPopoverPosition({ top: rect.bottom + 5, right: Math.max(8, window.innerWidth - rect.right) });
+    setMoreOpen(false);
+    setLockMinutes(resolveLockMinutes(settings.autoSwitchLockMinutes));
+    setLockDialogOpen(true);
+  };
   const toggleMoreMenu = (): void => {
     if (!moreOpen) {
       const rect = moreRef.current?.getBoundingClientRect();
@@ -130,8 +139,7 @@ export function OverviewSection(props: {
     if (!lockDialogOpen) return;
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!lockPopoverRef.current?.contains(target) && !lockPopoverContentRef.current?.contains(target))
-        setLockDialogOpen(false);
+      if (!lockPopoverContentRef.current?.contains(target)) setLockDialogOpen(false);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setLockDialogOpen(false);
@@ -145,16 +153,16 @@ export function OverviewSection(props: {
   }, [lockDialogOpen]);
   const overviewMetrics = account
     ? account.metrics
-        .filter((metric) => metric.visible && (metric.key.includes("hourly") || metric.key.includes("weekly")))
+        .filter((metric) => metric.visible && typeof metric.percentage === "number")
         .sort((left, right) => {
           const priority = (key: string): number =>
             props.metricPriority && key.includes(props.metricPriority) ? 0 : key.includes("weekly") ? 1 : 2;
           return priority(left.key) - priority(right.key);
         })
-        .slice(0, 2)
     : [];
 
   return (
+    <>
     <div class="overview-shell">
       {account ? (
         <div class="overview-account">
@@ -180,46 +188,13 @@ export function OverviewSection(props: {
                       ) : (
                         <ResetCreditIcon />
                       )}
-                      <span>{account.resetCreditsAvailable}</span>
+                      <span>{resolveResetCreditBadgeLabel(props.lang)} {account.resetCreditsAvailable}</span>
                     </button>
                   ) : null}
                 </div>
               </div>
               {teamNameDisplay ? <div class="overview-account-workspace">{teamNameDisplay}</div> : null}
               {account.tags.length ? <div class="account-tag-row">{renderTagList(account.tags)}</div> : null}
-              {showResetQuotaNotice ? (
-                <div class="overview-quota-notice" role="status">
-                  <div class="overview-quota-notice-copy">
-                    <span class="overview-quota-notice-icon" aria-hidden="true">!</span>
-                    <div>
-                      <div class="overview-quota-notice-title">
-                        {resolveResetQuotaNoticeTitle(props.lang, formatPercent(weeklyMetric?.percentage))}
-                      </div>
-                      <div class="overview-quota-notice-sub">
-                        {resolveResetQuotaNoticeSub(props.lang, settings.autoSwitchEnabled)}
-                      </div>
-                    </div>
-                  </div>
-                  <div class="overview-quota-notice-actions">
-                    <button
-                      class="overview-quota-notice-btn is-reset"
-                      type="button"
-                      disabled={props.disabled || props.consumeResetCreditPending}
-                      onClick={props.onConsumeResetCredit}
-                    >
-                      {props.consumeResetCreditPending ? "…" : copy.resetCreditsLabel}
-                    </button>
-                    <button
-                      class="overview-quota-notice-btn is-switch"
-                      type="button"
-                      disabled={props.disabled}
-                      onClick={props.onSwitchAccount}
-                    >
-                      {resolveResetQuotaSwitchLabel(props.lang)}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
             </div>
             <div class="overview-meta">
               <div class="overview-meta-item overview-meta-item-subscription">
@@ -281,6 +256,10 @@ export function OverviewSection(props: {
             now={now}
             privacyMode={privacyMode}
             lang={props.lang}
+            dailyUsage={props.dailyUsage}
+            dailyUsagePending={props.dailyUsagePending}
+            dailyUsageError={props.dailyUsageError}
+            onLoadDailyUsage={props.onLoadDailyUsage}
           />
         ) : null}
         <div class="overview-bottom-row">
@@ -375,89 +354,24 @@ export function OverviewSection(props: {
                 </>
               ) : null}
               {account ? (
-                <div class="saved-enabled-control-wrap" ref={lockPopoverRef}>
-                  <ActionButton
-                    class="toolbar-btn"
-                    icon={<span class="overview-action-symbol">{account.autoSwitchLockedUntil ? "🔓" : "🔒"}</span>}
-                    label={
-                      account.autoSwitchLockedUntil
-                        ? resolveAutoSwitchLockLabel(account.autoSwitchLockedUntil, now, props.lang)
-                        : copy.lockAutoSwitchBtn
-                    }
-                    aria-haspopup={account.autoSwitchLockedUntil ? undefined : "dialog"}
-                    aria-expanded={account.autoSwitchLockedUntil ? undefined : lockDialogOpen}
-                    onClick={() => {
-                      if (account.autoSwitchLockedUntil) {
-                        props.onSetAutoSwitchLock(0);
-                        return;
-                      }
-                      setLockMinutes(resolveLockMinutes(settings.autoSwitchLockMinutes));
-                      setLockDialogOpen(true);
-                    }}
-                  >
-                    {resolveAutoSwitchLockLabel(account.autoSwitchLockedUntil, now, props.lang)}
-                  </ActionButton>
-                  {!account.autoSwitchLockedUntil && lockDialogOpen
-                    ? createPortal(
-                        <div
-                          ref={lockPopoverContentRef}
-                          class="claim-popover claim-popover-portal auto-switch-lock-popover"
-                          role="dialog"
-                          aria-label={resolveLockDialogText("title", props.lang)}
-                          style={{ top: `${lockPopoverPosition.top}px`, right: `${lockPopoverPosition.right}px` }}
-                        >
-                          <div class="claim-popover-head">
-                            <div class="claim-popover-title">{resolveLockDialogText("title", props.lang)}</div>
-                            <button
-                              class="claim-popover-close"
-                              type="button"
-                              aria-label={resolveLockDialogText("cancel", props.lang)}
-                              onClick={() => setLockDialogOpen(false)}
-                            >
-                              ×
-                            </button>
-                          </div>
-                          <form
-                            class="auto-switch-lock-form"
-                            onSubmit={(event) => {
-                              event.preventDefault();
-                              const minutes = Math.max(1, Math.min(120, Math.round(lockMinutes)));
-                              props.onSetAutoSwitchLock(minutes);
-                              setLockDialogOpen(false);
-                            }}
-                          >
-                            <label class="auto-switch-lock-field">
-                              <span>{resolveLockDialogText("minutes", props.lang)}</span>
-                              <input
-                                class="modal-input"
-                                type="number"
-                                min="1"
-                                max="120"
-                                step="1"
-                                value={lockMinutes}
-                                onInput={(event) => setLockMinutes(event.currentTarget.valueAsNumber || 1)}
-                              />
-                            </label>
-                            <div class="claim-popover-actions">
-                              <button
-                                class="claim-popover-action is-secondary"
-                                type="button"
-                                onClick={() => setLockDialogOpen(false)}
-                              >
-                                {resolveLockDialogText("cancel", props.lang)}
-                              </button>
-                              <button class="claim-popover-action is-primary" type="submit">
-                                {resolveLockDialogText("apply", props.lang)}
-                              </button>
-                            </div>
-                          </form>
-                        </div>,
-                        document.body
-                      )
-                    : null}
-                </div>
+                <ActionButton
+                  class="toolbar-btn"
+                  icon={
+                    contextAction === "reload" ? renderReloadIcon() : contextAction === "switch" ? renderSwitchIcon() : <span class="overview-action-symbol">🛟</span>
+                  }
+                  label={resolveOverviewContextLabel(contextAction, props.lang)}
+                  disabled={props.disabled || (contextAction === "switch" && !switchTarget)}
+                  pending={contextAction === "reload" ? false : contextAction === "rescue" ? props.registryOverridePending : false}
+                  onClick={() => {
+                    if (contextAction === "reload") props.onReloadAccount();
+                    else if (contextAction === "rescue") props.onSetRegistryOverride(true);
+                    else if (switchTarget) props.onSwitchAccount(switchTarget.id);
+                  }}
+                >
+                  {resolveOverviewContextLabel(contextAction, props.lang)}
+                </ActionButton>
               ) : null}
-              {hasAccounts ? (
+              {account ? (
                 <div class="overview-more-wrap" ref={moreRef}>
                   <ActionButton
                     class="toolbar-btn"
@@ -480,49 +394,40 @@ export function OverviewSection(props: {
                           style={{ top: `${morePopoverPosition.top}px`, right: `${morePopoverPosition.right}px` }}
                         >
                           <div class="claim-popover-title">{resolveOverviewToolbarLabel("more", props.lang)}</div>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              setMoreOpen(false);
-                              props.onSwitchAccount();
-                            }}
-                          >
-                            ⇄ {resolveOverviewMenuLabel("switch", props.lang)}
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              setMoreOpen(false);
-                              props.onReloadAccount();
-                            }}
-                          >
-                            ↻ {resolveOverviewMenuLabel("reload", props.lang)}
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              setMoreOpen(false);
-                              props.onRefreshQuota();
-                            }}
-                          >
+                          {contextAction !== "switch" ? (
+                            <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); props.onSwitchAccount(switchTarget?.id); }} disabled={!switchTarget}>
+                              ⇄ {resolveOverviewMenuLabel("switch", props.lang)}
+                            </button>
+                          ) : null}
+                          {contextAction !== "reload" ? (
+                            <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); props.onReloadAccount(); }}>
+                              ↻ {resolveOverviewMenuLabel("reload", props.lang)}
+                            </button>
+                          ) : null}
+                          <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); props.onRefreshQuota(); }}>
                             ◌ {resolveOverviewMenuLabel("quota", props.lang)}
                           </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
+                          {contextAction !== "rescue" ? (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setMoreOpen(false);
+                                props.onSetRegistryOverride(!settings.encryptedSyncRegistryOverrideEnabled);
+                              }}
+                            >
+                              🛟 {resolveOverviewMenuLabel(settings.encryptedSyncRegistryOverrideEnabled ? "rescueOff" : "rescue", props.lang)}
+                            </button>
+                          ) : null}
+                          <button type="button" role="menuitem" onClick={(event) => {
+                            if (account.autoSwitchLockedUntil) {
                               setMoreOpen(false);
-                              props.onSetRegistryOverride(!settings.encryptedSyncRegistryOverrideEnabled);
-                            }}
-                          >
-                            🛟{" "}
-                            {resolveOverviewMenuLabel(
-                              settings.encryptedSyncRegistryOverrideEnabled ? "rescueOff" : "rescue",
-                              props.lang
-                            )}
+                              props.onSetAutoSwitchLock(0);
+                            } else {
+                              openLockDialog(event.currentTarget);
+                            }
+                          }}>
+                            {account.autoSwitchLockedUntil ? "🔓" : "🔒"} {resolveOverviewMenuLabel("lock", props.lang)}
                           </button>
                         </div>,
                         document.body
@@ -535,7 +440,111 @@ export function OverviewSection(props: {
         </div>
       </div>
     </div>
+    {account ? (
+      <LockDialog
+        account={account}
+        open={lockDialogOpen}
+        position={lockPopoverPosition}
+        lang={props.lang}
+        lockMinutes={lockMinutes}
+        setLockMinutes={setLockMinutes}
+        onSetAutoSwitchLock={props.onSetAutoSwitchLock}
+        onClose={() => setLockDialogOpen(false)}
+        contentRef={lockPopoverContentRef}
+      />
+    ) : null}
+    </>
   );
+}
+
+export function resolveOverviewContextAction(
+  account: Pick<DashboardAccountViewModel, "isActive" | "isCurrentWindowAccount" | "runningDeviceName" | "runningOnThisDevice">,
+  registryOverrideEnabled: boolean
+): "switch" | "reload" | "rescue" {
+  if (account.isActive && !account.isCurrentWindowAccount) return "reload";
+  if (account.runningDeviceName && !account.runningOnThisDevice && !registryOverrideEnabled) return "rescue";
+  return "switch";
+}
+
+export function resolveOverviewContextLabel(action: "switch" | "reload" | "rescue", lang: DashboardState["lang"]): string {
+  if (lang === "zh") return action === "switch" ? "切换" : action === "reload" ? "重载" : "救援";
+  if (lang === "zh-hant") return action === "switch" ? "切換" : action === "reload" ? "重載" : "救援";
+  return action === "switch" ? "Switch" : action === "reload" ? "Reload" : "Rescue";
+}
+
+/*
+ * The lock dialog is rendered below the toolbar markup. Keep it separate from
+ * the compact contextual action row so Lock remains available through More.
+ */
+function LockDialog(props: {
+  account: DashboardAccountViewModel;
+  open: boolean;
+  position: { top: number; right: number };
+  lang: DashboardState["lang"];
+  lockMinutes: number;
+  setLockMinutes: (minutes: number) => void;
+  onSetAutoSwitchLock: (minutes: number) => void;
+  onClose: () => void;
+  contentRef: preact.RefObject<HTMLDivElement>;
+}) {
+  return props.open && !props.account.autoSwitchLockedUntil
+    ? createPortal(
+        <div
+          ref={props.contentRef}
+          class="claim-popover claim-popover-portal auto-switch-lock-popover"
+          role="dialog"
+          aria-label={resolveLockDialogText("title", props.lang)}
+          style={{ top: `${props.position.top}px`, right: `${props.position.right}px` }}
+        >
+                          <div class="claim-popover-head">
+                            <div class="claim-popover-title">{resolveLockDialogText("title", props.lang)}</div>
+                            <button
+                              class="claim-popover-close"
+                              type="button"
+                              aria-label={resolveLockDialogText("cancel", props.lang)}
+                              onClick={props.onClose}
+                            >
+                              ×
+                            </button>
+                          </div>
+                          <form
+                            class="auto-switch-lock-form"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              const minutes = Math.max(1, Math.min(120, Math.round(props.lockMinutes)));
+                              props.onSetAutoSwitchLock(minutes);
+                              props.onClose();
+                            }}
+                          >
+                            <label class="auto-switch-lock-field">
+                              <span>{resolveLockDialogText("minutes", props.lang)}</span>
+                              <input
+                                class="modal-input"
+                                type="number"
+                                min="1"
+                                max="120"
+                                step="1"
+                                value={props.lockMinutes}
+                                onInput={(event) => props.setLockMinutes(event.currentTarget.valueAsNumber || 1)}
+                              />
+                            </label>
+                            <div class="claim-popover-actions">
+                              <button
+                                class="claim-popover-action is-secondary"
+                                type="button"
+                                onClick={props.onClose}
+                              >
+                                {resolveLockDialogText("cancel", props.lang)}
+                              </button>
+                              <button class="claim-popover-action is-primary" type="submit">
+                                {resolveLockDialogText("apply", props.lang)}
+                              </button>
+                           </div>
+                          </form>
+                        </div>,
+                        document.body
+                      )
+                    : null;
 }
 
 export function resolveOverviewPopoverPosition(
@@ -560,20 +569,8 @@ function resolveLockDialogText(key: "title" | "minutes" | "apply" | "cancel", la
   return copy[key];
 }
 
-function resolveAutoSwitchLockLabel(
-  lockedUntil: number | undefined,
-  now: number,
-  lang: DashboardState["lang"]
-): string {
-  if (!lockedUntil) return resolveOverviewToolbarLabel("lock", lang);
-  const minutes = Math.max(1, Math.ceil((lockedUntil - now) / 60_000));
-  const remaining = minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-  const unlock = lang === "zh" ? "解锁" : lang === "zh-hant" ? "解鎖" : "Unlock";
-  return `${unlock} · ${remaining}`;
-}
-
 export type UsageEvent = { at: number; accountId: string; used: number };
-type UsageGraphRange = "1h" | "3h" | "6h" | "24h" | "7d";
+type UsageGraphRange = "1h" | "3h" | "6h" | "24h" | "7d" | "30d";
 const USAGE_GRAPH_COLORS = ["#58a6ff", "#3fb950", "#d29922", "#bc8cff", "#f778ba", "#f0883e"];
 const USAGE_DEVICE_COLORS = ["#79c0ff", "#56d364", "#e3b341", "#d2a8ff", "#ff7bce", "#ffa657"];
 const USAGE_GRAPH_MAX_COLOR_KEYS = 6;
@@ -584,7 +581,8 @@ const USAGE_GRAPH_RANGES: Array<{ key: UsageGraphRange; label: string; durationM
   { key: "3h", label: "3H", durationMs: 3 * 60 * 60 * 1000 },
   { key: "6h", label: "6H", durationMs: 6 * 60 * 60 * 1000 },
   { key: "24h", label: "24H", durationMs: 24 * 60 * 60 * 1000 },
-  { key: "7d", label: "7D", durationMs: 7 * 24 * 60 * 60 * 1000 }
+  { key: "7d", label: "7D", durationMs: 7 * 24 * 60 * 60 * 1000 },
+  { key: "30d", label: "30D", durationMs: 30 * 24 * 60 * 60 * 1000 }
 ];
 const USAGE_GRAPH_VIEWBOX_HEIGHT = 56;
 const USAGE_GRAPH_BASELINE = 52;
@@ -596,9 +594,17 @@ function UsageGraph(props: {
   now: number;
   privacyMode: boolean;
   lang: DashboardState["lang"];
+  dailyUsage?: CodexDailyUsageBreakdown;
+  dailyUsagePending?: boolean;
+  dailyUsageError?: string;
+  onLoadDailyUsage?: () => void;
 }) {
   const [range, setRange] = useState<UsageGraphRange>("1h");
   const [windowOffset, setWindowOffset] = useState(0);
+  const [graphMode, setGraphMode] = useState<"quota" | "tokens">("quota");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [hoveredEvent, setHoveredEvent] = useState<{ event: UsageEvent; label: string; left: number; top: number }>();
+  const graphStageRef = useRef<HTMLDivElement>(null);
   const accountMap = new Map(
     props.accounts.map((account, index) => [
       account.id,
@@ -610,18 +616,26 @@ function UsageGraph(props: {
       }
     ])
   );
-  const rangeDuration = USAGE_GRAPH_RANGES.find((candidate) => candidate.key === range)?.durationMs ?? 60 * 60 * 1000;
-  const oldestHistoryAt = props.history.reduce(
+  const availableRanges = USAGE_GRAPH_RANGES;
+  const activeRange = availableRanges.some((candidate) => candidate.key === range) ? range : graphMode === "tokens" ? "30d" : "1h";
+  const rangeDuration = USAGE_GRAPH_RANGES.find((candidate) => candidate.key === activeRange)?.durationMs ?? 60 * 60 * 1000;
+  const tokenEvents: UsageEvent[] = (props.dailyUsage?.points ?? []).flatMap((point) => {
+    const at = Date.parse(`${point.date}T12:00:00Z`);
+    const accountId = props.accounts.find((account) => account.isActive)?.id ?? props.accounts[0]?.id;
+    return Number.isFinite(at) && accountId && point.totalTokens >= 0 ? [{ at, accountId, used: point.totalTokens }] : [];
+  });
+  const sourceEvents = graphMode === "tokens" ? tokenEvents : buildUsageEvents(props.history);
+  const oldestHistoryAt = sourceEvents.reduce(
     (oldest, sample) => Math.min(oldest, sample.at),
     Number.POSITIVE_INFINITY
   );
   const graphEndAt = props.now - windowOffset * rangeDuration;
   const graphStartAt = graphEndAt - rangeDuration;
-  const graphAxisMode: "time" | "date" = range.endsWith("h") ? "time" : "date";
+  const graphAxisMode: "time" | "date" = activeRange.endsWith("h") ? "time" : "date";
   const visibleHistory = selectUsageHistoryWindow(props.history, graphStartAt, graphEndAt);
-  const bucketCount = resolveUsageGraphBucketCount(range);
+  const bucketCount = resolveUsageGraphBucketCount(activeRange);
   const events = aggregateUsageEvents(
-    buildUsageEvents(visibleHistory).filter((event) => event.at >= graphStartAt && event.at <= graphEndAt),
+    (graphMode === "tokens" ? tokenEvents : buildUsageEvents(visibleHistory)).filter((event) => event.at >= graphStartAt && event.at <= graphEndAt),
     graphStartAt,
     rangeDuration,
     bucketCount
@@ -650,7 +664,7 @@ function UsageGraph(props: {
     <div class="usage-graph-card">
       <div class="usage-graph-head">
         <div class="usage-graph-title">
-          <span>{props.lang === "zh" ? "配额" : "Qouta"}</span>
+           <span>{graphMode === "tokens" ? (props.lang === "zh" ? "每日用量" : "Daily usage") : props.lang === "zh" ? "配额" : "Quota"}</span>
           {legendAccounts.length ? (
             <span
               class="usage-graph-color-key"
@@ -680,20 +694,28 @@ function UsageGraph(props: {
         </div>
         <div class="usage-graph-controls">
           <div class="usage-graph-ranges" aria-label={props.lang === "zh" ? "图表时间范围" : "Graph time range"}>
-            {USAGE_GRAPH_RANGES.map((candidate) => (
-              <button
-                key={candidate.key}
-                class={candidate.key === range ? "active" : ""}
-                type="button"
-                aria-pressed={candidate.key === range}
-                onClick={() => {
-                  setRange(candidate.key);
-                  setWindowOffset(0);
-                }}
-              >
-                {candidate.label}
-              </button>
-            ))}
+            <select
+              value={activeRange}
+              aria-label={props.lang === "zh" ? "图表时间范围" : "Graph time range"}
+              onChange={(event) => {
+                setRange(event.currentTarget.value as UsageGraphRange);
+                setWindowOffset(0);
+              }}
+            >
+              {availableRanges.map((candidate) => <option key={candidate.key} value={candidate.key}>{candidate.label}</option>)}
+            </select>
+          </div>
+          <div class="usage-graph-settings-wrap">
+            <button type="button" class={settingsOpen ? "active" : ""} aria-label={props.lang === "zh" ? "图表设置" : "Graph settings"} title={props.lang === "zh" ? "图表设置" : "Graph settings"} onClick={() => setSettingsOpen((open) => !open)}>⚙</button>
+            {settingsOpen ? (
+              <div class="usage-graph-settings-popover" role="dialog">
+                <strong>{props.lang === "zh" ? "数据" : "Data"}</strong>
+                <button type="button" class={graphMode === "quota" ? "active" : ""} onClick={() => { setGraphMode("quota"); setRange("1h"); setWindowOffset(0); setSettingsOpen(false); }}>Quota changes</button>
+                <button type="button" class={graphMode === "tokens" ? "active" : ""} onClick={() => { setGraphMode("tokens"); setRange("30d"); setWindowOffset(0); }}>Daily token usage</button>
+                {graphMode === "tokens" && !props.dailyUsage ? <button type="button" disabled={props.dailyUsagePending} onClick={props.onLoadDailyUsage}>{props.dailyUsagePending ? "Loading…" : "Load usage"}</button> : null}
+                {props.dailyUsageError ? <span class="usage-graph-settings-error" role="alert">{props.dailyUsageError}</span> : null}
+              </div>
+            ) : null}
           </div>
           <div class="usage-graph-navigation">
             <button
@@ -721,7 +743,7 @@ function UsageGraph(props: {
           </div>
         </div>
       </div>
-      <div class="usage-graph-stage">
+      <div class="usage-graph-stage" ref={graphStageRef} onMouseLeave={() => setHoveredEvent(undefined)}>
         <div class="usage-graph-axis" aria-hidden="true">
           <span>{axisTop}</span>
           <span>{axisMid}</span>
@@ -770,9 +792,32 @@ function UsageGraph(props: {
                     style={{ animationDelay: `${(index % 10) * 110}ms` }}
                     tabIndex={0}
                     aria-label={ariaLabel}
-                    title={ariaLabel}
+                    onMouseEnter={(pointerEvent) => {
+                      const stage = graphStageRef.current?.getBoundingClientRect();
+                      const bar = pointerEvent.currentTarget.getBoundingClientRect();
+                      if (stage) {
+                        setHoveredEvent({
+                          event,
+                          label: account.label,
+                          left: ((bar.left + bar.width / 2 - stage.left) / stage.width) * 100,
+                          top: Math.max(4, bar.top - stage.top - 8)
+                        });
+                      }
+                    }}
+                    onFocus={(focusEvent) => {
+                      const stage = graphStageRef.current?.getBoundingClientRect();
+                      const bar = focusEvent.currentTarget.getBoundingClientRect();
+                      if (stage) {
+                        setHoveredEvent({
+                          event,
+                          label: account.label,
+                          left: ((bar.left + bar.width / 2 - stage.left) / stage.width) * 100,
+                          top: Math.max(4, bar.top - stage.top - 8)
+                        });
+                      }
+                    }}
+                    onBlur={() => setHoveredEvent(undefined)}
                   >
-                    <title>{ariaLabel}</title>
                   </rect>
                 );
               })}
@@ -790,6 +835,19 @@ function UsageGraph(props: {
             </div>
           </div>
         </div>
+        {hoveredEvent ? (
+          <div
+            class="usage-graph-tooltip"
+            role="status"
+            style={{ left: `${Math.min(96, Math.max(4, hoveredEvent.left))}%`, top: `${hoveredEvent.top}px` }}
+          >
+            <strong>{hoveredEvent.label}</strong>
+            <span>
+              {formatUsageValue(hoveredEvent.event.used)} {props.lang === "zh" ? "配额使用" : "quota used"}
+            </span>
+            <time>{formatGraphTime(hoveredEvent.event.at, props.lang, graphAxisMode)}</time>
+          </div>
+        ) : null}
         {!events.length ? (
           <div class="usage-graph-empty">
             {props.lang === "zh" ? "尚未检测到配额下降" : "No quota decrease detected yet"}
@@ -893,6 +951,8 @@ export function resolveUsageGraphBucketCount(range: UsageGraphRange): number {
       return 48;
     case "7d":
       return 56;
+    case "30d":
+      return 60;
   }
 }
 
@@ -1022,31 +1082,17 @@ export function resolveOverviewToolbarLabel(
   return values[locale][action];
 }
 
-export function resolveResetQuotaNoticeTitle(lang: DashboardState["lang"], weeklyPercent: string): string {
-  if (lang === "zh") return `每周配额剩余：${weeklyPercent} · 可用重置次数`;
-  if (lang === "zh-hant") return `每週配額剩餘：${weeklyPercent} · 可用重置次數`;
-  return `Weekly quota remaining: ${weeklyPercent} · reset available`;
+export function resolveResetCreditBadgeLabel(lang: DashboardState["lang"]): string {
+  if (lang === "zh") return "重置";
+  if (lang === "zh-hant") return "重設";
+  return "Reset";
 }
 
-function resolveResetQuotaNoticeSub(lang: DashboardState["lang"], autoSwitchEnabled: boolean): string {
-  if (lang === "zh") return autoSwitchEnabled ? "自动切号已启用，也可以立即重置使用量。" : "切换账号继续，或立即重置使用量。";
-  if (lang === "zh-hant") return autoSwitchEnabled ? "自動切換已啟用，也可以立即重置使用量。" : "切換帳號繼續，或立即重置使用量。";
-  return autoSwitchEnabled
-    ? "Auto-switch is enabled; you can also reset usage now."
-    : "Switch accounts to continue, or reset usage now.";
-}
-
-function resolveResetQuotaSwitchLabel(lang: DashboardState["lang"]): string {
-  if (lang === "zh") return "切换账号";
-  if (lang === "zh-hant") return "切換帳號";
-  return "Switch";
-}
-
-function resolveOverviewMenuLabel(action: "switch" | "reload" | "quota" | "rescue" | "rescueOff", lang: DashboardState["lang"]): string {
+function resolveOverviewMenuLabel(action: "switch" | "reload" | "quota" | "rescue" | "rescueOff" | "lock", lang: DashboardState["lang"]): string {
   const values = {
-    en: { switch: "Switch account", reload: "Reload window", quota: "Refresh quota", rescue: "Enable rescue", rescueOff: "Disable rescue" },
-    zh: { switch: "切换账号", reload: "重新加载窗口", quota: "刷新配额", rescue: "开启救援", rescueOff: "关闭救援" },
-    "zh-hant": { switch: "切換帳號", reload: "重新載入視窗", quota: "重新整理配額", rescue: "開啟救援", rescueOff: "關閉救援" }
+    en: { switch: "Switch", reload: "Reload", quota: "Quota", rescue: "Rescue", rescueOff: "Rescue off", lock: "Lock" },
+    zh: { switch: "切换", reload: "重载", quota: "配额", rescue: "救援", rescueOff: "关闭救援", lock: "锁定" },
+    "zh-hant": { switch: "切換", reload: "重載", quota: "配額", rescue: "救援", rescueOff: "關閉救援", lock: "鎖定" }
   } as const;
   return values[lang === "zh" || lang === "zh-hant" ? lang : "en"][action];
 }

@@ -14,6 +14,13 @@ export function isAccountAttention(account: DashboardAccountViewModel): boolean 
   );
 }
 
+export function countAccountEnablement(
+  accounts: readonly DashboardAccountViewModel[]
+): { enabled: number; disabled: number } {
+  const enabled = accounts.filter((account) => account.enabled).length;
+  return { enabled, disabled: accounts.length - enabled };
+}
+
 export function createShareFileName(): string {
   const now = new Date();
   const year = String(now.getFullYear());

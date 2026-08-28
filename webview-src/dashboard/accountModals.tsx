@@ -1,4 +1,9 @@
-import type { DashboardCopy, DashboardOAuthSessionDescriptor, DashboardState } from "../../src/domain/dashboard/types";
+import type {
+  DashboardAccountViewModel,
+  DashboardCopy,
+  DashboardOAuthSessionDescriptor,
+  DashboardState
+} from "../../src/domain/dashboard/types";
 import type { CodexImportPreviewSummary, CodexImportResultSummary } from "../../src/core/types";
 import { ImportPreviewPanel, ImportResultPanel, ModalShell } from "./components";
 import { createShareFileName, formatTemplate, maskSharedJson } from "./helpers";
@@ -32,11 +37,112 @@ function resolveAccountModalTabLabel(tab: "add" | "import", lang: DashboardState
   return tab === "add" ? "Add" : "Import";
 }
 
-function resolveOAuthLinkStatus(lang: DashboardState["lang"], ready: boolean, pending: boolean): string {
-  if (lang === "zh") return ready ? "已就绪" : pending ? "生成中…" : "点击生成";
-  if (lang === "zh-hant") return ready ? "已就緒" : pending ? "產生中…" : "點擊產生";
-  if (pending) return "Generating…";
-  return ready ? "Ready" : "Generate on click";
+export function resolveCreateOAuthLinkLabel(lang: DashboardState["lang"]): string {
+  if (lang === "zh") return "创建链接";
+  if (lang === "zh-hant") return "建立連結";
+  return "Create Link";
+}
+
+function resolveAccountInfoCopy(lang: DashboardState["lang"]): {
+  title: string;
+  workspace: string;
+  subscription: string;
+  addedBy: string;
+  created: string;
+  status: string;
+  userId: string;
+  accountId: string;
+  organizationId: string;
+  tags: string;
+  noTags: string;
+} {
+  if (lang === "zh") {
+    return {
+      title: "账号信息",
+      workspace: "工作区",
+      subscription: "订阅",
+      addedBy: "添加方式",
+      created: "创建时间",
+      status: "状态",
+      userId: "用户 ID",
+      accountId: "账号 ID",
+      organizationId: "组织 ID",
+      tags: "标签",
+      noTags: "无标签"
+    };
+  }
+  if (lang === "zh-hant") {
+    return {
+      title: "帳號資訊",
+      workspace: "工作區",
+      subscription: "訂閱",
+      addedBy: "新增方式",
+      created: "建立時間",
+      status: "狀態",
+      userId: "使用者 ID",
+      accountId: "帳號 ID",
+      organizationId: "組織 ID",
+      tags: "標籤",
+      noTags: "無標籤"
+    };
+  }
+  return {
+    title: "Account info",
+    workspace: "Workspace",
+    subscription: "Subscription",
+    addedBy: "Added by",
+    created: "Created",
+    status: "Status",
+    userId: "User ID",
+    accountId: "Account ID",
+    organizationId: "Organization ID",
+    tags: "Tags",
+    noTags: "No tags"
+  };
+}
+
+export function AccountInfoModal(props: {
+  account?: DashboardAccountViewModel;
+  lang: DashboardState["lang"];
+  closeLabel: string;
+  onClose: () => void;
+}) {
+  const account = props.account;
+  const copy = resolveAccountInfoCopy(props.lang);
+  return (
+    <ModalShell
+      open={Boolean(account)}
+      title={account ? `${copy.title}: ${account.email}` : copy.title}
+      closeLabel={props.closeLabel}
+      className="dashboard-modal-compact account-info-modal"
+      onClose={props.onClose}
+    >
+      {account ? (
+        <div class="account-info-grid">
+          <InfoRow label={copy.workspace} value={account.workspaceLabel} />
+          <InfoRow label={copy.subscription} value={account.subscriptionText} title={account.subscriptionTitle} />
+          <InfoRow label={copy.addedBy} value={account.addMethodLabel} />
+          <InfoRow label={copy.created} value={account.addedAtLabel} />
+          <InfoRow label={copy.status} value={account.healthLabel} />
+          <InfoRow label={copy.userId} value={account.userId ?? "—"} mono />
+          <InfoRow label={copy.accountId} value={account.accountId ?? "—"} mono />
+          <InfoRow label={copy.organizationId} value={account.organizationId ?? "—"} mono />
+          <InfoRow label={copy.tags} value={account.tags.length ? account.tags.join(", ") : copy.noTags} />
+        </div>
+      ) : null}
+    </ModalShell>
+  );
+}
+
+function InfoRow(props: { label: string; value: string; title?: string; mono?: boolean }) {
+  return (
+    <div class="account-info-row">
+      <span class="account-info-label">{props.label}</span>
+      <span class={`account-info-value ${props.mono ? "is-mono" : ""}`} title={props.title}>
+        {props.value}
+      </span>
+    </div>
+  );
 }
 
 export function AddAccountModal(props: {
@@ -60,6 +166,7 @@ export function AddAccountModal(props: {
   importSharedPending: boolean;
   onClose: () => void;
   onSelectTab: (tab: "oauth" | "import") => void;
+  onCreateOauthLink: () => void;
   onCopyOauthLink: () => void;
   onOpenInBrowser: () => void;
   onOauthCallbackChange: (value: string) => void;
@@ -110,13 +217,6 @@ export function AddAccountModal(props: {
       {props.tab === "oauth" ? (
         <div class="modal-stack oauth-modal-stack">
           <div class="oauth-launch-panel">
-            <div
-              class={`oauth-link-status ${oauthLinkReady ? "is-ready" : props.prepareOAuthPending ? "is-loading" : "is-idle"}`}
-              aria-live="polite"
-            >
-              <span class="oauth-link-status-dot" aria-hidden="true" />
-              {resolveOAuthLinkStatus(props.lang, oauthLinkReady, props.prepareOAuthPending)}
-            </div>
             <div class="oauth-launch-actions">
               <input
                 class="modal-input oauth-link-input"
@@ -126,29 +226,45 @@ export function AddAccountModal(props: {
                 placeholder={props.copy.authorizationLink}
                 aria-label={props.copy.authorizationLink}
               />
-              <button
-                class={`modal-mini-btn modal-icon-btn oauth-copy-btn ${props.copyFeedbackKey === "oauth-link" ? "is-success" : ""}`}
-                type="button"
-                disabled={props.prepareOAuthPending}
-                aria-label={props.copyFeedbackKey === "oauth-link" ? props.copy.copySuccess : props.copy.copyLink}
-                title={props.copyFeedbackKey === "oauth-link" ? props.copy.copySuccess : props.copy.copyLink}
-                onClick={props.onCopyOauthLink}
-              >
-                <span class="modal-btn-icon" aria-hidden="true">
-                  {props.copyFeedbackKey === "oauth-link" ? <SuccessIcon /> : <CopyIcon />}
-                </span>
-              </button>
-              <button
-                class="modal-primary-btn oauth-open-btn"
-                type="button"
-                disabled={props.prepareOAuthPending || props.startOAuthAutoPending}
-                onClick={props.onOpenInBrowser}
-              >
-                <span class="modal-btn-icon" aria-hidden="true">
-                  <GlobeIcon />
-                </span>
-                {props.startOAuthAutoPending ? "..." : props.copy.openInBrowser}
-              </button>
+              {oauthLinkReady ? (
+                <>
+                  <button
+                    class={`modal-mini-btn modal-icon-btn oauth-copy-btn ${props.copyFeedbackKey === "oauth-link" ? "is-success" : ""}`}
+                    type="button"
+                    aria-label={props.copyFeedbackKey === "oauth-link" ? props.copy.copySuccess : props.copy.copyLink}
+                    title={props.copyFeedbackKey === "oauth-link" ? props.copy.copySuccess : props.copy.copyLink}
+                    onClick={props.onCopyOauthLink}
+                  >
+                    <span class="modal-btn-icon" aria-hidden="true">
+                      {props.copyFeedbackKey === "oauth-link" ? <SuccessIcon /> : <CopyIcon />}
+                    </span>
+                  </button>
+                  <button
+                    class="modal-primary-btn oauth-open-btn"
+                    type="button"
+                    disabled={props.startOAuthAutoPending}
+                    onClick={props.onOpenInBrowser}
+                  >
+                    <span class="modal-btn-icon" aria-hidden="true">
+                      <GlobeIcon />
+                    </span>
+                    {props.startOAuthAutoPending ? "..." : props.copy.openInBrowser}
+                  </button>
+                </>
+              ) : (
+                <button
+                  class="modal-primary-btn oauth-create-link-btn"
+                  type="button"
+                  disabled={props.prepareOAuthPending}
+                  aria-busy={props.prepareOAuthPending}
+                  onClick={props.onCreateOauthLink}
+                >
+                  <span class="modal-btn-icon" aria-hidden="true">
+                    <GlobeIcon />
+                  </span>
+                  {props.prepareOAuthPending ? "..." : resolveCreateOAuthLinkLabel(props.lang)}
+                </button>
+              )}
             </div>
           </div>
           <div class="modal-field oauth-callback-field">

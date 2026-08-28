@@ -5,7 +5,7 @@ import {
   resolveOverviewPopoverPosition,
   resolveOverviewToolbarActionCount,
   resolveOverviewToolbarLabel,
-  resolveResetQuotaNoticeTitle
+  resolveResetCreditBadgeLabel
 } from "../webview-src/dashboard/overviewSection";
 
 describe("overview actions", () => {
@@ -54,8 +54,30 @@ describe("overview actions", () => {
     );
   });
 
-  it("includes the weekly remaining percentage in the reset warning", () => {
-    expect(resolveResetQuotaNoticeTitle("en", "18%")).toBe("Weekly quota remaining: 18% · reset available");
-    expect(resolveResetQuotaNoticeTitle("zh", "18%")).toContain("18%");
+  it("keeps reset availability in the compact badge instead of a second quota block", () => {
+    const source = readFileSync("webview-src/dashboard/overviewSection.tsx", "utf8");
+    const css = readFileSync("media/webview/quotaSummary.css", "utf8");
+
+    expect(source).toContain('class="overview-reset-credit"');
+    expect(resolveResetCreditBadgeLabel("en")).toBe("Reset");
+    expect(source).toContain("resolveResetCreditBadgeLabel(props.lang)");
+    expect(source).not.toContain("overview-quota-notice");
+    expect(source).not.toContain("Weekly quota remaining");
+    expect(source).not.toContain("Auto-switch is enabled");
+    expect(css).not.toContain(".overview-quota-notice");
+  });
+
+  it("renders every visible metric and uses an in-app graph tooltip", () => {
+    const overview = readFileSync("webview-src/dashboard/overviewSection.tsx", "utf8");
+    const state = readFileSync("webview-src/dashboard/main.tsx", "utf8");
+    expect(overview).toContain('typeof metric.percentage === "number"');
+    expect(overview).toContain("usage-graph-tooltip");
+    expect(overview).toContain("onMouseEnter");
+    expect(overview).toContain("usage-graph-settings-popover");
+    expect(overview).toContain('onLoadDailyUsage');
+    expect(overview).toContain('graphMode === "tokens"');
+    expect(state).toContain("availableMetrics");
+    expect(state).toContain('"login-date"');
+    expect(state).toContain('"account-type"');
   });
 });

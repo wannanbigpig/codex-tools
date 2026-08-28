@@ -45,6 +45,7 @@ export function getActionTimeoutMs(action: DashboardActionName): number {
     case "switch":
     case "refresh":
     case "refreshToken":
+    case "getDailyUsage":
       return 120_000;
     case "remove":
     case "toggleAccountEnabled":

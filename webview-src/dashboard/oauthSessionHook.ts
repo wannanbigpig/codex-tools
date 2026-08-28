@@ -34,12 +34,17 @@ export function useOAuthSessionModal(params: {
     reset();
   };
 
+  const handlePrepareOauthLink = (): void => {
+    if (oauthState.oauthSession?.authUrl || actionInFlight.current) {
+      return;
+    }
+    actionInFlight.current = "prepare";
+    params.sendAction("prepareOAuthSession", params.getPrepareAccountId?.());
+  };
+
   const handleCopyOauthLink = (): void => {
     if (!oauthState.oauthSession?.authUrl) {
-      if (!actionInFlight.current) {
-        actionInFlight.current = "prepare";
-        params.sendAction("prepareOAuthSession", params.getPrepareAccountId?.());
-      }
+      handlePrepareOauthLink();
       return;
     }
     params.sendAction("copyText", undefined, { text: oauthState.oauthSession.authUrl });
@@ -51,8 +56,7 @@ export function useOAuthSessionModal(params: {
       return;
     }
     if (!oauthState.oauthSession?.authUrl) {
-      actionInFlight.current = "prepare";
-      params.sendAction("prepareOAuthSession", params.getPrepareAccountId?.());
+      handlePrepareOauthLink();
       return;
     }
     if (params.openAuthorizationInClient) {
@@ -118,6 +122,7 @@ export function useOAuthSessionModal(params: {
     oauthFlowStarted: oauthState.oauthFlowStarted,
     cancelSession,
     reset,
+    handlePrepareOauthLink,
     handleCopyOauthLink,
     handleStartOAuthAutoFlow,
     handleCompleteOAuth,

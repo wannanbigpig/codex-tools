@@ -15,7 +15,8 @@ describe("native UI tooltips", () => {
   it("does not reintroduce custom tooltip markup or styling", () => {
     const source = nativeTitleSources.map((file) => readFileSync(file, "utf8")).join("\n");
 
-    expect(source).not.toMatch(/button-tip|saved-control-tip|saved-detail-tooltip|usage-graph-tooltip|data-tip/);
+    expect(source).not.toMatch(/button-tip|saved-control-tip|saved-detail-tooltip|data-tip/);
+    expect(readFileSync("webview-src/dashboard/overviewSection.tsx", "utf8")).toContain("usage-graph-tooltip");
   });
 
   it("uses title attributes for shared action buttons and detail usage bars", () => {

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { refreshSingleQuota } from "../../application/accounts/quota";
 import { fetchResetCredits, consumeResetCredit } from "../../services/quota";
+import { fetchDailyUsageBreakdown } from "../../services/usage";
 import { getDashboardCopy } from "../../application/dashboard/copy";
 import type {
   DashboardActionName,
@@ -52,7 +53,8 @@ const COMMAND_ROUTED_ACTIONS = new Set<DashboardActionName>([
   "cancelOAuthSession",
   "refreshView",
   "reloadPrompt",
-  "getResetCredits"
+  "getResetCredits",
+  "getDailyUsage"
 ]);
 import type { DashboardOAuthCoordinator } from "./oauthCoordinator";
 import { ExtensionSettingsStore } from "../../infrastructure/config/extensionSettings";
@@ -94,6 +96,7 @@ const ACCOUNT_REQUIRED_ACTIONS = new Set<DashboardActionName>([
   "setAccountTokenRefreshEnabled",
   "refreshToken",
   "getResetCredits",
+  "getDailyUsage",
   "consumeResetCredit"
 ]);
 
@@ -337,6 +340,8 @@ async function runDashboardAction(
       return handleRefreshToken(ctx.repo, account, ctx.schedulePublishState, ctx.resolveLanguage());
     case "getResetCredits":
       return handleGetResetCredits(ctx.repo, account);
+    case "getDailyUsage":
+      return handleGetDailyUsage(ctx.repo, account, payload?.days);
     case "consumeResetCredit":
       return handleConsumeResetCredit(ctx.repo, account, ctx.schedulePublishState, ctx.resolveLanguage());
     default:
@@ -983,6 +988,26 @@ async function handleGetResetCredits(
   const accountId = account.accountId ?? undefined;
   const snapshot = await fetchResetCredits(tokens.accessToken, accountId);
   return { resetCredits: snapshot };
+}
+
+async function handleGetDailyUsage(
+  repo: AccountsRepository,
+  account: Awaited<ReturnType<AccountsRepository["getAccount"]>>,
+  requestedDays: number | undefined
+) {
+  if (!account) {
+    throw new Error("Account not found");
+  }
+  const tokens = await repo.getTokens(account.id, { bypassCache: true });
+  if (!tokens?.accessToken) {
+    throw new Error("No access token is available for usage history.");
+  }
+  const days = Math.min(30, Math.max(1, Math.round(requestedDays ?? 30)));
+  const dailyUsage = await fetchDailyUsageBreakdown(tokens, days);
+  if (!dailyUsage) {
+    throw new Error("The usage endpoint returned no readable data.");
+  }
+  return { dailyUsage };
 }
 
 async function handleConsumeResetCredit(

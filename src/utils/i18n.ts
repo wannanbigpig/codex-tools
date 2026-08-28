@@ -396,6 +396,7 @@ export function getQuotaWarningCopy(): {
   message: (account: string, quota: string, value: number, threshold: number) => string;
   switchAccount: (account: string) => string;
   resetAccount: (account: string) => string;
+  resetAvailableSummary: (weeklyLabel: string, weeklyValue: number) => string;
   selectAccount: string;
   autoSelect: string;
   later: string;
@@ -408,6 +409,8 @@ export function getQuotaWarningCopy(): {
     reviewLabel: _t("quotaWarning.reviewLabel"),
     switchAccount: (account: string) => `${_t("quotaWarning.switchAccount")} ${account}`,
     resetAccount: (account: string) => `${_t("quotaWarning.resetAccount")} ${account}`,
+    resetAvailableSummary: (weeklyLabel: string, weeklyValue: number) =>
+      `${weeklyLabel}: ${weeklyValue}% · ${_t("quotaWarning.resetAccount")}.`,
     selectAccount: _t("quotaWarning.selectAccount"),
     autoSelect: _t("quotaWarning.autoSelect"),
     later: _t("quotaWarning.later"),

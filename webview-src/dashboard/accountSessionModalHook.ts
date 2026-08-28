@@ -125,6 +125,7 @@ export function useAccountSessionModal(params: {
     openRecoveryImportModal,
     openImportModal,
     handleAddAccountTabChange,
+    handlePrepareOauthLink: oauth.handlePrepareOauthLink,
     handleCopyOauthLink: oauth.handleCopyOauthLink,
     handleStartOAuthAutoFlow: oauth.handleStartOAuthAutoFlow,
     handleCompleteOAuth: oauth.handleCompleteOAuth,

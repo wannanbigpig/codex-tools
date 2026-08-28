@@ -456,6 +456,56 @@ describe("executeDashboardActionMessage", () => {
     expect(duplicate.status).toBe("completed");
     expect(context.publishState).toHaveBeenCalledTimes(2);
   });
+
+  it("loads daily usage only for an explicit account action and caps the requested window", async () => {
+    const context = createContext();
+    const account = { id: "usage-account", email: "usage@example.com" };
+    context.repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      getTokens: vi.fn().mockResolvedValue({
+        accessToken: "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.",
+        idToken: "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0."
+      })
+    } as unknown as DashboardActionContext["repo"];
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ days: 30, daily_usage: [{ date: "2026-08-28", total_tokens: 42 }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "getDailyUsage",
+      accountId: account.id,
+      requestId: "req-daily-usage",
+      payload: { days: 365 }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.payload?.dailyUsage?.points[0]?.totalTokens).toBe(42);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("days=30");
+    vi.unstubAllGlobals();
+  });
+
+  it("returns a visible failure when daily usage has no access token", async () => {
+    const context = createContext();
+    context.repo = {
+      getAccount: vi.fn().mockResolvedValue({ id: "usage-account", email: "usage@example.com" }),
+      getTokens: vi.fn().mockResolvedValue(undefined)
+    } as unknown as DashboardActionContext["repo"];
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "getDailyUsage",
+      accountId: "usage-account",
+      requestId: "req-daily-usage-missing-token"
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/access token/i);
+  });
 });
 
 function createContext(): DashboardActionContext {
