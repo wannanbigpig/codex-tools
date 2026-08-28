@@ -7763,6 +7763,30 @@ html[data-theme="auto"] body.vscode-light .settings-inline-toggle-thumb {
   }
 }
 
+/* Mobile account actions remain one compact icon row. Labels stay available
+   through each button's aria-label and native title tooltip. */
+@media (max-width: 650px) {
+  .overview-bottom-row .overview-actions:not(.overview-empty-actions) .toolbar {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 3px;
+  }
+
+  .overview-bottom-row .overview-actions:not(.overview-empty-actions) .toolbar-btn {
+    min-height: 28px;
+    height: 28px;
+    padding: 2px;
+  }
+
+  .overview-bottom-row .overview-actions:not(.overview-empty-actions) .toolbar-btn .button-face {
+    gap: 0;
+    justify-content: center;
+  }
+
+  .overview-bottom-row .overview-actions:not(.overview-empty-actions) .toolbar-btn .button-label {
+    display: none;
+  }
+}
+
 .saved-health-reason,
 .saved-table-health-reason {
   display: block;

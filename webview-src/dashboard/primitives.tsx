@@ -8,7 +8,7 @@ export function ActionButton(props: {
   icon?: ComponentChildren;
   iconOnly?: boolean;
   label?: string;
-  "aria-haspopup"?: "dialog";
+  "aria-haspopup"?: "dialog" | "menu";
   "aria-expanded"?: boolean;
   children?: ComponentChildren;
 }) {

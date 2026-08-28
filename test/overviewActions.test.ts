@@ -1,6 +1,8 @@
+import { readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
 import {
   resolveOverviewRefreshMode,
+  resolveOverviewPopoverPosition,
   resolveOverviewToolbarActionCount,
   resolveOverviewToolbarLabel,
   resolveResetQuotaNoticeTitle
@@ -29,6 +31,27 @@ describe("overview actions", () => {
     expect(resolveOverviewToolbarActionCount(true, true, true)).toBe(4);
     expect(resolveOverviewToolbarActionCount(true, false, true)).toBe(4);
     expect(resolveOverviewToolbarActionCount(false, false, true)).toBe(2);
+  });
+
+  it("positions the More menu in the viewport-level layer below its trigger", () => {
+    expect(resolveOverviewPopoverPosition({ bottom: 80, right: 334 }, 357)).toEqual({ top: 85, right: 23 });
+    expect(resolveOverviewPopoverPosition({ bottom: 80, right: 355 }, 357)).toEqual({ top: 85, right: 8 });
+
+    const source = readFileSync("webview-src/dashboard/overviewSection.tsx", "utf8");
+    expect(source).toContain('class="claim-popover claim-popover-portal overview-more-menu"');
+    expect(source).toContain("morePopoverContentRef.current?.contains(target)");
+    expect(source).toMatch(/overview-more-menu[\s\S]*document\.body/);
+  });
+
+  it("keeps all four account actions in one icon-only row on mobile", () => {
+    const css = readFileSync("media/webview/quotaSummary.css", "utf8");
+
+    expect(css).toMatch(
+      /\.overview-bottom-row \.overview-actions:not\(\.overview-empty-actions\) \.toolbar \{\r?\n\s+grid-template-columns: repeat\(4, minmax\(0, 1fr\)\) !important;/
+    );
+    expect(css).toMatch(
+      /\.overview-bottom-row \.overview-actions:not\(\.overview-empty-actions\) \.toolbar-btn \.button-label \{\r?\n\s+display: none;/
+    );
   });
 
   it("includes the weekly remaining percentage in the reset warning", () => {

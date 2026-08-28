@@ -72,7 +72,9 @@ export function OverviewSection(props: {
   const lockPopoverRef = useRef<HTMLDivElement>(null);
   const lockPopoverContentRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
+  const morePopoverContentRef = useRef<HTMLDivElement>(null);
   const [lockPopoverPosition, setLockPopoverPosition] = useState({ top: 0, right: 0 });
+  const [morePopoverPosition, setMorePopoverPosition] = useState({ top: 0, right: 0 });
   useEffect(() => {
     if (!lockDialogOpen) return;
     const updatePosition = () => {
@@ -87,10 +89,32 @@ export function OverviewSection(props: {
       window.removeEventListener("scroll", updatePosition, true);
     };
   }, [lockDialogOpen]);
+  const toggleMoreMenu = (): void => {
+    if (!moreOpen) {
+      const rect = moreRef.current?.getBoundingClientRect();
+      if (rect) setMorePopoverPosition(resolveOverviewPopoverPosition(rect, window.innerWidth));
+    }
+    setMoreOpen((open) => !open);
+  };
+  useEffect(() => {
+    if (!moreOpen) return;
+    const updatePosition = (): void => {
+      const rect = moreRef.current?.getBoundingClientRect();
+      if (rect) setMorePopoverPosition(resolveOverviewPopoverPosition(rect, window.innerWidth));
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [moreOpen]);
   useEffect(() => {
     if (!moreOpen) return;
     const close = (event: PointerEvent) => {
-      if (!moreRef.current?.contains(event.target as Node)) setMoreOpen(false);
+      const target = event.target as Node;
+      if (!moreRef.current?.contains(target) && !morePopoverContentRef.current?.contains(target)) setMoreOpen(false);
     };
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape") setMoreOpen(false);
@@ -440,43 +464,52 @@ export function OverviewSection(props: {
                     icon={<span class="overview-action-symbol">⋯</span>}
                     label={resolveOverviewToolbarLabel("more", props.lang)}
                     disabled={props.disabled}
-                    onClick={() => setMoreOpen((open) => !open)}
+                    aria-haspopup="menu"
+                    aria-expanded={moreOpen}
+                    onClick={toggleMoreMenu}
                   >
                     {resolveOverviewToolbarLabel("more", props.lang)}
                   </ActionButton>
-                  {moreOpen ? (
-                    <div class="claim-popover overview-more-menu" role="menu">
-                      <div class="claim-popover-title">{resolveOverviewToolbarLabel("more", props.lang)}</div>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setMoreOpen(false);
-                          props.onSwitchAccount();
-                        }}
-                      >
-                        ⇄ {resolveOverviewMenuLabel("switch", props.lang)}
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setMoreOpen(false);
-                          props.onReloadAccount();
-                        }}
-                      >
-                        ↻ {resolveOverviewMenuLabel("reload", props.lang)}
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setMoreOpen(false);
-                          props.onRefreshQuota();
-                        }}
-                      >
-                        ◌ {resolveOverviewMenuLabel("quota", props.lang)}
-                      </button>
+                  {moreOpen
+                    ? createPortal(
+                        <div
+                          ref={morePopoverContentRef}
+                          class="claim-popover claim-popover-portal overview-more-menu"
+                          role="menu"
+                          aria-label={resolveOverviewToolbarLabel("more", props.lang)}
+                          style={{ top: `${morePopoverPosition.top}px`, right: `${morePopoverPosition.right}px` }}
+                        >
+                          <div class="claim-popover-title">{resolveOverviewToolbarLabel("more", props.lang)}</div>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setMoreOpen(false);
+                              props.onSwitchAccount();
+                            }}
+                          >
+                            ⇄ {resolveOverviewMenuLabel("switch", props.lang)}
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setMoreOpen(false);
+                              props.onReloadAccount();
+                            }}
+                          >
+                            ↻ {resolveOverviewMenuLabel("reload", props.lang)}
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setMoreOpen(false);
+                              props.onRefreshQuota();
+                            }}
+                          >
+                            ◌ {resolveOverviewMenuLabel("quota", props.lang)}
+                          </button>
                           <button
                             type="button"
                             role="menuitem"
@@ -485,10 +518,16 @@ export function OverviewSection(props: {
                               props.onSetRegistryOverride(!settings.encryptedSyncRegistryOverrideEnabled);
                             }}
                           >
-                        🛟 {resolveOverviewMenuLabel(settings.encryptedSyncRegistryOverrideEnabled ? "rescueOff" : "rescue", props.lang)}
-                      </button>
-                    </div>
-                  ) : null}
+                            🛟{" "}
+                            {resolveOverviewMenuLabel(
+                              settings.encryptedSyncRegistryOverrideEnabled ? "rescueOff" : "rescue",
+                              props.lang
+                            )}
+                          </button>
+                        </div>,
+                        document.body
+                      )
+                    : null}
                 </div>
               ) : null}
             </div>
@@ -497,6 +536,16 @@ export function OverviewSection(props: {
       </div>
     </div>
   );
+}
+
+export function resolveOverviewPopoverPosition(
+  triggerRect: Pick<DOMRect, "bottom" | "right">,
+  viewportWidth: number
+): { top: number; right: number } {
+  return {
+    top: triggerRect.bottom + 5,
+    right: Math.max(8, viewportWidth - triggerRect.right)
+  };
 }
 
 function resolveLockDialogText(key: "title" | "minutes" | "apply" | "cancel", lang: DashboardState["lang"]): string {
