@@ -12,7 +12,7 @@ import { needsWindowReloadForAccount, setCurrentWindowRuntimeAccountId } from ".
 import { buildWorkbenchRefreshSignature } from "./refreshSignature";
 import { getTokenAutomationSnapshot } from "./tokenAutomationState";
 import { autoReloadWindowForAccount, promptWindowReloadForAccount } from "../../application/accounts/switchEffects";
-import { runCentralAccountOperation } from "../../utils/crossWindowOperations";
+import { runCrossWindowExclusive } from "../../utils/crossWindowOperations";
 
 type RefreshView = {
   refresh: () => void;
@@ -184,7 +184,7 @@ export class WorkbenchRefreshCoordinator {
           cancellable: false
         },
         async () => {
-          await runCentralAccountOperation("Import current account", async () => {
+          await runCrossWindowExclusive("background:account-import-current", "Import current account", async () => {
             const account = await this.repo.importCurrentAuth();
             this.lastObservedAuthIdentity = account.id;
             const result = await refreshImportedAccountQuota(this.repo, account.id);

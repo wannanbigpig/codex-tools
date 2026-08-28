@@ -7,8 +7,6 @@ import type { EncryptedSyncManager } from "../services/encryptedSync";
 import { getCodexAccountsConfiguration } from "../infrastructure/config/extensionSettings";
 import {
   CrossWindowOperationBusyError,
-  CENTRAL_ACCOUNT_OPERATION_KEY,
-  ENCRYPTED_SYNC_OPERATION_KEY,
   runCrossWindowExclusive
 } from "../utils/crossWindowOperations";
 import { shouldSuppressDashboardNotifications } from "../utils/notificationPolicy";
@@ -86,10 +84,7 @@ export function registerCommands(
   const runCommand = runRegisteredCommand;
   const runAccountCommand = <T>(
     label: string,
-    action: () => T | Thenable<T>,
-    announceBusy = true,
-    retryBusy = true,
-    operationKey = CENTRAL_ACCOUNT_OPERATION_KEY
+    action: () => T | Thenable<T>
   ): Thenable<T> =>
     runCommand(
       label,
@@ -100,8 +95,7 @@ export function registerCommands(
           await repo.flush();
         }
       },
-      operationKey,
-      { announceBusy, retryBusy }
+      undefined
     );
   const runSyncCommand = <T>(
     label: string,
@@ -117,7 +111,7 @@ export function registerCommands(
           await repo.flush();
         }
       },
-      ENCRYPTED_SYNC_OPERATION_KEY,
+      undefined,
       { announceBusy }
     );
 
@@ -132,7 +126,7 @@ export function registerCommands(
       runAccountCommand("Reauthorize account", () => service.reauthorizeAccount(item))
     ),
     vscode.commands.registerCommand("codexAccounts.switchAccount", (item?: CodexAccountRecord) =>
-      runAccountCommand("Switch account", () => service.switchAccount(item), true, true, `account:switch:${item?.id ?? "pick"}`)
+      runAccountCommand("Switch account", () => service.switchAccount(item))
     ),
     vscode.commands.registerCommand("codexAccounts.autoSelectAccount", () =>
       runAccountCommand("Auto-select account", () => service.autoSelectAccount())
@@ -146,7 +140,7 @@ export function registerCommands(
     vscode.commands.registerCommand(
       "codexAccounts.refreshAllQuotas",
       (options?: { silent?: boolean; forceRefresh?: boolean; excludeCurrent?: boolean }) =>
-        runAccountCommand("Refresh all quotas", () => service.refreshAllQuotas(options), options?.silent !== true)
+        runAccountCommand("Refresh all quotas", () => service.refreshAllQuotas(options))
     ),
     vscode.commands.registerCommand("codexAccounts.restoreAccountsFromBackup", () =>
       runAccountCommand("Restore accounts from backup", () => service.restoreAccountsFromBackup())
@@ -164,13 +158,7 @@ export function registerCommands(
       runAccountCommand("Toggle status bar account", () => service.toggleStatusBarAccount(item))
     ),
     vscode.commands.registerCommand("codexAccounts.toggleAccountEnabled", (item?: CodexAccountRecord) =>
-      runAccountCommand(
-        "Toggle account",
-        () => service.toggleAccountEnabled(item),
-        true,
-        false,
-        `account:toggle:${item?.id ?? "pick"}`
-      )
+      runAccountCommand("Toggle account", () => service.toggleAccountEnabled(item))
     ),
     vscode.commands.registerCommand(
       "codexAccounts.openDetails",
@@ -211,7 +199,7 @@ export function registerCommands(
     vscode.commands.registerCommand(
       "codexAccounts.syncNow",
       (options?: { announceSuccess?: boolean; backgroundIfBusy?: boolean }) => {
-        const backgroundIfBusy = options?.backgroundIfBusy !== false;
+        const backgroundIfBusy = options?.backgroundIfBusy === true;
         const task = runSyncCommand(
           "Encrypted account sync",
           () => sync?.syncNow(true, options?.announceSuccess ?? true),

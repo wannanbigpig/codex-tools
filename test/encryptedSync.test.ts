@@ -31,6 +31,24 @@ describe("encrypted account sync", () => {
     vi.restoreAllMocks();
   });
 
+  it("consolidates background sync five minutes after an enablement mutation", async () => {
+    vi.useFakeTimers();
+    const context = {
+      subscriptions: [] as vscode.Disposable[],
+      globalState: { get: vi.fn(() => undefined), update: vi.fn(async () => undefined), setKeysForSync: vi.fn() },
+      secrets: { get: vi.fn(async () => undefined), store: vi.fn(async () => undefined), delete: vi.fn(async () => undefined) }
+    } as unknown as vscode.ExtensionContext;
+    const manager = new EncryptedSyncManager(context, {} as never);
+    const sync = vi.spyOn(manager, "syncNow").mockResolvedValue(true);
+
+    manager.queueBackgroundSync(5 * 60 * 1000);
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 - 1);
+    expect(sync).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sync).toHaveBeenCalledWith(false, false, true);
+    manager.dispose();
+  });
+
   it("encrypts and decrypts an authenticated compressed vault without exposing credentials", async () => {
     const payload = createPayload([createEntry("one", 100, "refresh-secret")]);
     payload.leases = [

@@ -21,7 +21,6 @@ import {
 import { clearTokenAutomationError } from "../../presentation/workbench/tokenAutomationState";
 import { getCommandCopy, getLanguage, getQuotaWarningCopy, resolveLongQuotaLabel } from "../../utils";
 import { getQuotaIssueKind } from "../../utils/quotaIssue";
-import { runCentralAccountOperation } from "../../utils/crossWindowOperations";
 import { getDashboardCopy } from "../dashboard/copy";
 import {
   compareCodexAccountAutoQueueOrder,
@@ -69,9 +68,7 @@ export async function refreshSingleQuota(
   accountId: string,
   options: RefreshSingleQuotaOptions = {}
 ): Promise<QuotaRefreshResult> {
-  return runCentralAccountOperation("Quota refresh", () =>
-    runAndFlush(repo, () => refreshSingleQuotaInternal(repo, view, accountId, options))
-  );
+  return runAndFlush(repo, () => refreshSingleQuotaInternal(repo, view, accountId, options));
 }
 
 async function refreshSingleQuotaInternal(
@@ -128,8 +125,7 @@ async function refreshSingleQuotaInternal(
     // 账号信息同步需要等订阅写入完成后再发布页面状态，避免继续展示旧套餐和旧到期时间。
     await subscriptionRefresh;
   } else {
-    // Keep all state writes inside the central cross-window operation. This
-    // prevents a detached subscription update from racing the next action.
+    // Finish the account-level state write before this action reports success.
     await subscriptionRefresh;
   }
   // 后台异步拉取重置次数明细（含最新可用次数与最近到期时间），不阻塞配额刷新
@@ -170,9 +166,7 @@ export async function refreshImportedAccountQuota(
   repo: AccountsRepository,
   accountId: string
 ): Promise<QuotaRefreshResult> {
-  return runCentralAccountOperation("Quota refresh", () =>
-    runAndFlush(repo, () => refreshImportedAccountQuotaInternal(repo, accountId))
-  );
+  return runAndFlush(repo, () => refreshImportedAccountQuotaInternal(repo, accountId));
 }
 
 async function runAndFlush<T>(repo: AccountsRepository, task: () => Promise<T>): Promise<T> {

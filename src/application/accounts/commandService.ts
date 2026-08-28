@@ -28,7 +28,7 @@ import { handleCodexAppRestartPreference, promptWindowReloadForAccount } from ".
 import { activateQueuedAccountIfCurrentMissing } from "./queuedAccountActivation";
 import {
   CrossWindowOperationBusyError,
-  runCentralAccountOperation
+  runCrossWindowExclusive
 } from "../../utils/crossWindowOperations";
 const REFRESH_ALL_SILENT_CONCURRENCY = 1;
 const REFRESH_ALL_MANUAL_CONCURRENCY = 2;
@@ -293,7 +293,7 @@ export class AccountsCommandService {
           progress?.report({ message: copy.refreshingStep(started, accounts.length, account.email) });
           if (options?.silent) {
             try {
-              await runCentralAccountOperation("Quota refresh", () =>
+              await runCrossWindowExclusive(`quota:refresh:${account.id}`, "Quota refresh", () =>
                 refreshSingleQuotaSafely(this.repo, this.view, account.id, {
                   allowTokenRefresh: isBackgroundTokenRefreshEnabled(),
                   forceRefresh: options.forceRefresh,
@@ -308,7 +308,7 @@ export class AccountsCommandService {
             return;
           }
           try {
-            await runCentralAccountOperation("Quota refresh", () =>
+            await runCrossWindowExclusive(`quota:refresh:${account.id}`, "Quota refresh", () =>
               refreshSingleQuota(this.repo, this.view, account.id, {
                 announce: false,
                 forceRefresh: options?.forceRefresh ?? true,
@@ -531,7 +531,7 @@ export class AccountsCommandService {
   }
 
   private async pickSwitchAccount(placeHolder: string): Promise<CodexAccountRecord | undefined> {
-    const accounts = (await this.repo.listAccounts()).slice().sort(compareCodexAccountAutoQueueOrder);
+    const accounts = (await this.repo.listAccounts()).slice().sort(compareSwitchPickerOrder);
     if (!accounts.length) {
       void vscode.window.showInformationMessage(getCommandCopy().noAccounts);
       return undefined;
@@ -619,4 +619,11 @@ function buildSwitchPickerDetail(account: CodexAccountRecord, hourlyLabel: strin
 
 function formatQuickPickQuota(value: number | undefined): string {
   return typeof value === "number" ? `${value}%` : "--";
+}
+
+/** Keep the manual switch picker in the same queue order as Auto Select. */
+export function compareSwitchPickerOrder(left: CodexAccountRecord, right: CodexAccountRecord): number {
+  if (left.isActive !== right.isActive) return left.isActive ? -1 : 1;
+  if ((left.enabled !== false) !== (right.enabled !== false)) return left.enabled !== false ? -1 : 1;
+  return compareCodexAccountAutoQueueOrder(left, right) || left.email.localeCompare(right.email);
 }

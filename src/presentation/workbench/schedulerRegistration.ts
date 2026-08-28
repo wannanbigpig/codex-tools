@@ -23,7 +23,7 @@ import {
 } from "./tokenAutomationState";
 import {
   CrossWindowOperationBusyError,
-  runCentralAccountOperation
+  runCrossWindowExclusive
 } from "../../utils/crossWindowOperations";
 
 const CURRENT_REFRESH_FAILURE_BACKOFF_MULTIPLIER = 5;
@@ -88,7 +88,7 @@ export function registerAutoRefreshScheduler(params: {
       const refreshCurrent = async (current: { id: string }): Promise<void> => {
         let failed = false;
         try {
-          await runCentralAccountOperation("Quota refresh", async () => {
+          await runCrossWindowExclusive(`background:quota-refresh:${current.id}`, "Quota refresh", async () => {
             if (params.canRefreshAccount && !params.canRefreshAccount(current.id)) {
               return;
             }
@@ -208,7 +208,7 @@ export function registerTokenRefreshScheduler(params: {
     let checked = 0;
     let refreshedCount = 0;
     try {
-      await runCentralAccountOperation("Background token refresh", async () => {
+      await runCrossWindowExclusive("background:token-refresh-sweep", "Background token refresh", async () => {
         markTokenAutomationSweepStarted();
         const accounts = (await params.repo.listAccounts()).filter(
           (account) =>
@@ -222,7 +222,7 @@ export function registerTokenRefreshScheduler(params: {
 
         for (const account of accounts) {
           try {
-            await runCentralAccountOperation("Token refresh", async () => {
+            await runCrossWindowExclusive(`background:token-refresh:${account.id}`, "Token refresh", async () => {
               const tokens = await params.repo.getTokens(account.id, { bypassCache: true });
               markTokenAutomationCheck(account.id);
               checked += 1;

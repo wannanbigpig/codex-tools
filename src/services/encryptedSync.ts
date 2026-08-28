@@ -26,6 +26,7 @@ const LOCAL_DELETIONS_KEY = "codexAccounts.encryptedSync.localDeletions.v1";
 const LOCAL_ENABLEMENT_KEY = "codexAccounts.encryptedSync.localEnablement.v1";
 const LEGACY_LOCAL_ASSIGNMENTS_KEY = "codexAccounts.encryptedSync.localAssignments.v1";
 const LOCAL_ENABLEMENT_PENDING_KEY = "codexAccounts.encryptedSync.localEnablementPending.v1";
+const ENABLEMENT_SYNC_CONSOLIDATION_DELAY_MS = 5 * 60 * 1000;
 const REGISTRY_OVERRIDE_KEY = "codexAccounts.encryptedSync.enablementOverride.v1";
 const SCRYPT_COST = 131_072;
 const MAX_ACCOUNTS = 500;
@@ -326,6 +327,7 @@ export class EncryptedSyncManager implements vscode.Disposable {
         await this.markEnablementPending([accountId]);
       });
     await this.mutationChain;
+    this.queueBackgroundSync(ENABLEMENT_SYNC_CONSOLIDATION_DELAY_MS);
   }
 
   async setRegistryOverrideEnabled(enabled: boolean): Promise<boolean> {
@@ -446,13 +448,16 @@ export class EncryptedSyncManager implements vscode.Disposable {
     if (this.currentSyncTask) {
       return this.currentSyncTask;
     }
-    const task = runEncryptedSyncOperation("Encrypted account sync", async () => {
+    const execute = async (): Promise<boolean> => {
       try {
         return await this.performSyncNow(interactive, announceSuccess, syncSettings);
       } finally {
         await this.repo.flush?.();
       }
-    });
+    };
+    // User-triggered sync runs immediately. Only background maintenance takes
+    // the cross-window lease, so a maintenance sync cannot block a click.
+    const task = interactive ? execute() : runEncryptedSyncOperation("Encrypted account sync", execute);
     this.currentSyncTask = task;
     try {
       return await task;

@@ -289,7 +289,7 @@ describe("executeDashboardActionMessage", () => {
     expect(result.payload?.notice).toBeUndefined();
   });
 
-  it("automatically syncs the registry after an account toggle without a sync detail notice", async () => {
+  it("completes an account toggle without waiting for encrypted sync", async () => {
     vi.mocked(vscode.workspace.getConfiguration)
       .mockReset()
       .mockReturnValue({
@@ -310,12 +310,42 @@ describe("executeDashboardActionMessage", () => {
       accountId: account.id
     });
 
-    expect(vscode.commands.executeCommand).toHaveBeenCalledWith("codexAccounts.syncNow", {
-      announceSuccess: false,
-      backgroundIfBusy: true
-    });
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("codexAccounts.syncNow", expect.anything());
     expect(result.status).toBe("completed");
     expect(result.payload?.notice).toBeUndefined();
+  });
+
+  it("does not block an account toggle while a background account task is running", async () => {
+    const blocker = new CrossWindowOperationCoordinator(operationDirectory);
+    const account = { id: "account-toggle", email: "toggle@example.com", enabled: true };
+    let release!: () => void;
+    let started!: () => void;
+    const startedPromise = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const held = blocker.runExclusive(`background:quota-refresh:${account.id}`, "Quota refresh", async () => {
+      started();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    await startedPromise;
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      setAccountEnabled: vi.fn().mockResolvedValue({ ...account, enabled: false })
+    } as unknown as DashboardActionContext["repo"];
+
+    const result = await executeDashboardActionMessage({ ...createContext(), repo }, {
+      type: "dashboard:action",
+      action: "toggleAccountEnabled",
+      requestId: "req-toggle-background-busy",
+      accountId: account.id
+    });
+
+    expect(result.status).toBe("completed");
+    expect(repo.setAccountEnabled).toHaveBeenCalledWith(account.id, false);
+    release();
+    await held;
   });
 
   it("completes an account toggle locally when another window already owns sync", async () => {

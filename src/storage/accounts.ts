@@ -95,7 +95,7 @@ import { extractClaims, isTokenExpired } from "../utils/jwt";
 import { getQuotaIssueKind } from "../utils/quotaIssue";
 import {
   CrossWindowOperationBusyError,
-  runCentralAccountOperation,
+  runCrossWindowExclusive,
   runCentralAccountOperationWithCooldown
 } from "../utils/crossWindowOperations";
 import { AccountError, StorageError, createError, ErrorCode } from "../core/errors";
@@ -184,10 +184,10 @@ export class AccountsRepository {
       if (options.deferSync) {
         return { authSyncCompleted: true, mirrorSyncCompleted: true };
       }
-      await runCentralAccountOperation("Account auth sync", () =>
+      await runCrossWindowExclusive("background:account-auth-sync", "Account auth sync", () =>
         this.runAndFlush(() => this.syncActiveAccountFromAuthFileInternal())
       );
-      await runCentralAccountOperation("Account mirror sync", () =>
+      await runCrossWindowExclusive("background:account-mirror-sync", "Account mirror sync", () =>
         this.runAndFlush(() => this.syncFromAideckMirrorInternal())
       );
       return { authSyncCompleted: true, mirrorSyncCompleted: true };
@@ -201,7 +201,7 @@ export class AccountsRepository {
   }
 
   async syncFromAideckMirror(): Promise<CodexAccountRecord[]> {
-    return runCentralAccountOperation("Account mirror sync", () =>
+    return runCrossWindowExclusive("background:account-mirror-sync", "Account mirror sync", () =>
       this.runAndFlush(() => this.syncFromAideckMirrorInternal())
     );
   }
@@ -1155,7 +1155,7 @@ export class AccountsRepository {
    * 同步激活账号状态 (从 auth.json)
    */
   async syncActiveAccountFromAuthFile(): Promise<void> {
-    await runCentralAccountOperation("Account auth sync", () =>
+    await runCrossWindowExclusive("background:account-auth-sync", "Account auth sync", () =>
       this.runAndFlush(() => this.syncActiveAccountFromAuthFileInternal())
     );
   }

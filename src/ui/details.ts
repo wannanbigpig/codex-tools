@@ -25,7 +25,7 @@ import {
   resolveLongQuotaLabel
 } from "../utils";
 import { formatRelativeReset, formatTimestamp } from "../utils/time";
-import { CrossWindowOperationBusyError, runCentralAccountOperation } from "../utils/crossWindowOperations";
+import { CrossWindowOperationBusyError, runCrossWindowExclusive } from "../utils/crossWindowOperations";
 
 let detailsPanel: vscode.WebviewPanel | undefined;
 let detailsPanelRequestId = 0;
@@ -112,9 +112,7 @@ export function openDetailsPanel(
           return;
         }
         try {
-          await runCentralAccountOperation("Update account tags", () =>
-            detailsPanelState.repo!.setAccountTags(current.id, tags)
-          );
+          await detailsPanelState.repo!.setAccountTags(current.id, tags);
           await refreshDetailsPanel();
           void vscode.window.showInformationMessage(`Updated tags for ${current.email}.`);
         } catch (error) {
@@ -205,7 +203,7 @@ async function getFreshUsageTokens(
     return tokens;
   }
 
-  const refreshed = await runCentralAccountOperation("Token refresh", () =>
+  const refreshed = await runCrossWindowExclusive(`background:token-refresh:${accountId}`, "Token refresh", () =>
     refreshTokens(tokens.refreshToken!, tokens.idToken)
   ).catch((error: unknown) => {
     if (error instanceof CrossWindowOperationBusyError) {

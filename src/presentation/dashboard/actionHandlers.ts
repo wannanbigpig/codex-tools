@@ -19,11 +19,6 @@ import { appendImportedDebugLogs, getDebugLogSnapshot, showNetworkDebugLogs } fr
 import { clearAutoSwitchLock, setAutoSwitchLock } from "../workbench/autoSwitchState";
 import { promptForTags } from "../tagEditor";
 import { parseSharedJsonInput, toFailureMessage, toImportActionPayload } from "./actionUtils";
-import {
-  CrossWindowOperationBusyError,
-  CENTRAL_ACCOUNT_OPERATION_KEY,
-  runCrossWindowExclusive
-} from "../../utils/crossWindowOperations";
 
 const COMMAND_ROUTED_ACTIONS = new Set<DashboardActionName>([
   "addAccount",
@@ -127,27 +122,10 @@ export async function executeDashboardActionMessage(
       try {
         return await execute();
       } finally {
-        if (getDashboardOperationKey(message.action, message.accountId) === CENTRAL_ACCOUNT_OPERATION_KEY) {
-          await ctx.repo.flush?.();
-        }
+        await ctx.repo.flush?.();
       }
     };
-    if (COMMAND_ROUTED_ACTIONS.has(message.action)) {
-      payload = await execute();
-    } else {
-      const operationKey = getDashboardOperationKey(message.action, message.accountId);
-      const operationLabel = formatDashboardOperationLabel(message.action);
-      const attempts = shouldRetryBusyDashboardAction(message.action) ? 20 : 0;
-      for (let attempt = 0; ; attempt += 1) {
-        try {
-          payload = await runCrossWindowExclusive(operationKey, operationLabel, executeAndFlush);
-          break;
-        } catch (error) {
-          if (!(error instanceof CrossWindowOperationBusyError) || attempt >= attempts) throw error;
-          await new Promise<void>((resolve) => setTimeout(resolve, 500));
-        }
-      }
-    }
+    payload = COMMAND_ROUTED_ACTIONS.has(message.action) ? await execute() : await executeAndFlush();
   } catch (error) {
     status = "failed";
     errorMessage = toFailureMessage(error);
@@ -164,47 +142,6 @@ export async function executeDashboardActionMessage(
     payload,
     errorMessage
   };
-}
-
-function getDashboardOperationKey(action: DashboardActionName, accountId?: string): string {
-  switch (action) {
-    case "prepareOAuthSession":
-      return CENTRAL_ACCOUNT_OPERATION_KEY;
-    case "startOAuthAutoFlow":
-    case "completeOAuthSession":
-      return CENTRAL_ACCOUNT_OPERATION_KEY;
-    case "cancelOAuthSession":
-      return "oauth:cancel";
-    case "toggleAccountEnabled":
-      return CENTRAL_ACCOUNT_OPERATION_KEY;
-    case "refreshToken":
-      return CENTRAL_ACCOUNT_OPERATION_KEY;
-    case "consumeResetCredit":
-      return CENTRAL_ACCOUNT_OPERATION_KEY;
-    case "restoreFromBackup":
-    case "restoreFromAuthJson":
-    case "importSharedJson":
-    case "updateTags":
-    case "setAutoSwitchLock":
-    case "batchRefresh":
-    case "batchResyncProfile":
-    case "batchRemove":
-    case "resyncProfile":
-    case "dismissHealthIssue":
-    case "setAccountQueuePriority":
-    case "setAccountTokenRefreshEnabled":
-      return CENTRAL_ACCOUNT_OPERATION_KEY;
-    default:
-      return `dashboard:${action}:${accountId ?? "global"}`;
-  }
-}
-
-function formatDashboardOperationLabel(action: DashboardActionName): string {
-  return action.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
-}
-
-function shouldRetryBusyDashboardAction(action: DashboardActionName): boolean {
-  return getDashboardOperationKey(action) === CENTRAL_ACCOUNT_OPERATION_KEY;
 }
 
 async function runDashboardAction(
@@ -376,29 +313,8 @@ async function runDashboardAction(
       return undefined;
     case "toggleAccountEnabled":
       if (account) {
-        let encryptedSyncEnabled = false;
         try {
           await ctx.repo.setAccountEnabled(account.id, account.enabled === false);
-          encryptedSyncEnabled = vscode.workspace
-            .getConfiguration("codexAccounts")
-            .get<boolean>("encryptedSyncEnabled", false);
-          if (encryptedSyncEnabled) {
-            try {
-              if (
-                (await vscode.commands.executeCommand<boolean>("codexAccounts.syncNow", {
-                  announceSuccess: false,
-                  backgroundIfBusy: true
-                })) !== true
-              ) {
-                throw new Error("Account updated. Encrypted sync is ready to retry from Sync Now.");
-              }
-            } catch (error) {
-              // The command normally queues a background retry when another
-              // window owns sync. Keep the already-successful local toggle
-              // successful even if a host/extension bridge rejects the call.
-              if (!(error instanceof CrossWindowOperationBusyError)) throw error;
-            }
-          }
         } finally {
           ctx.schedulePublishState();
         }
@@ -884,14 +800,12 @@ async function handleBatchRefresh(
     CODEX_BATCH_REFRESH_CONCURRENCY,
     async (id) => {
       try {
-        await runCrossWindowExclusive(`quota:refresh:${id}`, "Quota refresh", () =>
-          refreshSingleQuota(repo, { refresh() {} }, id, {
-            announce: false,
-            forceRefresh: true,
-            refreshView: false,
-            warnQuota: false
-          })
-        );
+        await refreshSingleQuota(repo, { refresh() {} }, id, {
+          announce: false,
+          forceRefresh: true,
+          refreshView: false,
+          warnQuota: false
+        });
         success += 1;
       } catch (error) {
         failed += 1;
