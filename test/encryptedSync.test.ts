@@ -73,6 +73,7 @@ describe("encrypted account sync", () => {
 
     manager.onAccountsMutated({ addedAccountIds: [], removedAccountIds: ["removed-account"] });
 
+    expect(manager.isAccountDeletionPending("removed-account")).toBe(true);
     await vi.waitFor(() => expect(queue).toHaveBeenCalledWith());
     expect(state.get("codexAccounts.encryptedSync.localDeletions.v1")).toEqual([
       expect.objectContaining({ accountId: "removed-account", deviceId: "device-one" })
@@ -449,6 +450,7 @@ describe("encrypted account sync", () => {
       exportSharedAccounts: vi.fn(async () => [local]),
       importSharedAccountsWithSummary: vi.fn(async () => ({ failedCount: 0 })),
       removeAccount: vi.fn(async () => undefined),
+      invalidateCachedIndex: vi.fn(),
       setAccountEnabledFromSync: vi.fn(async () => undefined)
     };
     markTokenAutomationRefreshFailure("one", "API returned 401: token expired");
@@ -456,6 +458,7 @@ describe("encrypted account sync", () => {
 
     await expect(manager.syncNow(false, false, false)).resolves.toBe(true);
 
+    expect(repo.invalidateCachedIndex).toHaveBeenCalled();
     expect(repo.importSharedAccountsWithSummary).toHaveBeenCalledWith([
       expect.objectContaining({
         id: remote.id,

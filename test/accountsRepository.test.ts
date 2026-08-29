@@ -368,6 +368,47 @@ describe("AccountsRepository token persistence", () => {
     repo.dispose();
   });
 
+  it("does not re-import a stale Aideck mirror entry when sync has a deletion tombstone", async () => {
+    const secrets = new Map<string, string>();
+    const context = {
+      globalStorageUri: {
+        fsPath: tempDir
+      },
+      secrets: {
+        get: vi.fn(async (key: string) => secrets.get(key)),
+        store: vi.fn(async (key: string, value: string) => {
+          secrets.set(key, value);
+        }),
+        delete: vi.fn(async (key: string) => {
+          secrets.delete(key);
+        })
+      }
+    } as unknown as vscode.ExtensionContext;
+    const aideckTokens = createTokens("acct_stale", "stale@example.com");
+    const storageId = buildAccountStorageId("stale@example.com", "acct_stale", undefined);
+    await writeAideckAccountJson(storageId, {
+      id: storageId,
+      email: "stale@example.com",
+      account_id: "acct_stale",
+      tokens: {
+        id_token: aideckTokens.idToken,
+        access_token: aideckTokens.accessToken,
+        refresh_token: "stale-refresh-token",
+        account_id: "acct_stale"
+      }
+    });
+
+    const repo = new AccountsRepository(context);
+    repo.setAccountSwitchCoordinator({
+      isAccountDeletionPending: (accountId) => accountId === storageId
+    });
+    await repo.init();
+
+    expect(await repo.getAccount(storageId)).toBeUndefined();
+    expect(secrets.get(`codex.account.${storageId}`)).toBeUndefined();
+    repo.dispose();
+  });
+
   it("does not absorb an Aideck token from a different organization when accountId is shared", async () => {
     const secrets = new Map<string, string>();
     const context = {

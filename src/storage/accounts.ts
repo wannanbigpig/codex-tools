@@ -137,6 +137,8 @@ export interface AccountSwitchCoordinator {
   onAccountsMutated?(change: { addedAccountIds: string[]; removedAccountIds: string[] }): void;
   prepareAccountEnablement?(accountId: string, enabled: boolean): Promise<void>;
   completeAccountEnablement?(accountId: string, enabled: boolean): Promise<void>;
+  /** Prevent compatibility-mirror imports from bypassing a synced deletion. */
+  isAccountDeletionPending?(accountId: string): boolean;
 }
 
 export class AccountsRepository {
@@ -226,7 +228,10 @@ export class AccountsRepository {
     const missing = sharedAccounts.filter((entry) => {
       try {
         const preview = previewSharedEntry(entry);
-        return Boolean(preview.storageId && !existingIds.has(preview.storageId));
+        if (!preview.storageId || existingIds.has(preview.storageId)) {
+          return false;
+        }
+        return !this.switchCoordinator?.isAccountDeletionPending?.(preview.storageId);
       } catch {
         return false;
       }

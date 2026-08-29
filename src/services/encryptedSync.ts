@@ -108,6 +108,7 @@ export class EncryptedSyncManager implements vscode.Disposable {
   private onStateChanged: (() => void) | undefined;
   private applyingRemote = false;
   private localEnablementDefaults = new Map<string, boolean>();
+  private readonly pendingDeletionAccountIds = new Set<string>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -169,6 +170,7 @@ export class EncryptedSyncManager implements vscode.Disposable {
 
   dispose(): void {
     this.disposed = true;
+    this.pendingDeletionAccountIds.clear();
     if (this.backgroundSyncTimer) {
       clearTimeout(this.backgroundSyncTimer);
       this.backgroundSyncTimer = undefined;
@@ -196,6 +198,8 @@ export class EncryptedSyncManager implements vscode.Disposable {
     if (this.disposed || this.applyingRemote || (!change.addedAccountIds.length && !change.removedAccountIds.length)) {
       return;
     }
+    for (const accountId of change.addedAccountIds) this.pendingDeletionAccountIds.delete(accountId);
+    for (const accountId of change.removedAccountIds) this.pendingDeletionAccountIds.add(accountId);
     this.mutationVersion += 1;
     this.mutationChain = this.mutationChain
       .catch(() => undefined)
@@ -275,6 +279,14 @@ export class EncryptedSyncManager implements vscode.Disposable {
 
   canRefreshAccount(accountId: string): boolean {
     return encryptedSyncRegistryOverrideEnabled || !this.findForeignEnablement(accountId);
+  }
+
+  /** Keep stale Aideck mirror files from bypassing synchronized deletions. */
+  isAccountDeletionPending(accountId: string): boolean {
+    return (
+      this.pendingDeletionAccountIds.has(accountId) ||
+      this.readLocalDeletions().some((entry) => entry.accountId === accountId)
+    );
   }
 
   async prepareAccountSwitch(accountId: string): Promise<void> {
@@ -508,6 +520,10 @@ export class EncryptedSyncManager implements vscode.Disposable {
       }
       await this.mutationChain.catch(() => undefined);
       const mutationVersion = this.mutationVersion;
+      // Another VS Code window may have replaced the shared index since this
+      // host last read it. Drop only the clean cache; pending local writes are
+      // intentionally preserved by the repository.
+      this.repo.invalidateCachedIndex?.();
       const local = await this.buildLocalPayload();
       const rawRemote = this.context.globalState.get<string>(SYNC_KEY);
       // Settings Sync may activate the extension before it has downloaded the
