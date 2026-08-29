@@ -1,9 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import * as fs from "fs/promises";
+import * as os from "os";
+import * as path from "path";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
 import type { DashboardActionContext } from "../src/presentation/dashboard/actionHandlers";
 
 const { consumeResetCreditMock } = vi.hoisted(() => ({
   consumeResetCreditMock: vi.fn().mockResolvedValue(undefined)
+}));
+const { readCodexCliSessionsMock, readCodexCliSessionSummaryMock, readCodexCliSessionMessagesMock } = vi.hoisted(() => ({
+  readCodexCliSessionsMock: vi.fn(),
+  readCodexCliSessionSummaryMock: vi.fn(),
+  readCodexCliSessionMessagesMock: vi.fn()
 }));
 
 vi.mock("../src/services/quota", async () => {
@@ -14,9 +22,339 @@ vi.mock("../src/services/quota", async () => {
   };
 });
 
-import { executeDashboardActionMessage } from "../src/presentation/dashboard/actionHandlers";
+vi.mock("../src/services/codexSessionResume", async () => {
+  const actual = await vi.importActual<typeof import("../src/services/codexSessionResume")>("../src/services/codexSessionResume");
+  return {
+    ...actual,
+    readCodexCliSessions: readCodexCliSessionsMock,
+    readCodexCliSessionSummary: readCodexCliSessionSummaryMock,
+    readCodexCliSessionMessages: readCodexCliSessionMessagesMock
+  };
+});
+
+import { executeDashboardActionMessage, isSafeExternalUrl } from "../src/presentation/dashboard/actionHandlers";
+import {
+  CrossWindowOperationBusyError,
+  CrossWindowOperationCoordinator,
+  configureCrossWindowOperationCoordinator
+} from "../src/utils/crossWindowOperations";
+import { removeTestDirectory } from "./testFilesystem";
+import { setCurrentWindowRuntimeAccountId } from "../src/presentation/workbench/windowRuntimeAccount";
+
+let operationDirectory: string;
+
+beforeAll(async () => {
+  operationDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "dashboard-actions-"));
+  await configureCrossWindowOperationCoordinator(operationDirectory);
+});
+
+afterAll(async () => {
+  await removeTestDirectory(operationDirectory);
+});
+
+describe("isSafeExternalUrl", () => {
+  it("allows ordinary HTTP(S) URLs and rejects executable or credential-bearing schemes", () => {
+    expect(isSafeExternalUrl("https://openai.com/research")).toBe(true);
+    expect(isSafeExternalUrl("http://localhost:3000/help")).toBe(true);
+    expect(isSafeExternalUrl("http://example.com/help")).toBe(false);
+    expect(isSafeExternalUrl("javascript:alert(1)")).toBe(false);
+    expect(isSafeExternalUrl("file:///tmp/auth.json")).toBe(false);
+    expect(isSafeExternalUrl("https://user:password@example.com/private")).toBe(false);
+  });
+});
 
 describe("executeDashboardActionMessage", () => {
+  it("opens the CLI Sessions web route with visible completion feedback", async () => {
+    vi.mocked(vscode.commands.executeCommand).mockReset().mockResolvedValueOnce("opened");
+
+    const result = await executeDashboardActionMessage(createContext(), {
+      type: "dashboard:action",
+      action: "openWebDashboard",
+      requestId: "req-open-cli-sessions",
+      payload: { path: "/sessions" }
+    });
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      "codexAccounts.openWebDashboard",
+      { pathname: "/sessions" }
+    );
+    expect(result.status).toBe("completed");
+    expect(result.payload?.notice).toEqual({ level: "info", message: "Opened CLI Sessions in the Web Dashboard." });
+  });
+
+  it("returns a visible failure and does not open an archived CLI session", async () => {
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValueOnce({
+      get: (key: string, fallback?: unknown) => key === "cliIntegrationEnabled" ? true : fallback
+    } as unknown as vscode.WorkspaceConfiguration);
+    readCodexCliSessionSummaryMock.mockResolvedValueOnce({
+      id: "01a04882-d037-7a42-ad24-9afb61901188",
+      title: "Archived demo",
+      status: "idle",
+      archived: true
+    });
+    readCodexCliSessionMessagesMock.mockClear();
+
+    const result = await executeDashboardActionMessage(createContext(), {
+      type: "dashboard:action",
+      action: "getCodexCliSessionMessages",
+      requestId: "req-archived-session",
+      payload: { sessionId: "01a04882-d037-7a42-ad24-9afb61901188" }
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/archived sessions cannot be opened/i);
+    expect(readCodexCliSessionMessagesMock).not.toHaveBeenCalled();
+  });
+
+  it("returns visible completion feedback when the overview lock is set or removed", async () => {
+    const account = { id: "lock-account", email: "lock@example.com" };
+    const context = {
+      ...createContext(),
+      repo: { getAccount: vi.fn().mockResolvedValue(account) } as unknown as DashboardActionContext["repo"]
+    };
+
+    const locked = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "setAutoSwitchLock",
+      requestId: "req-lock",
+      accountId: account.id,
+      payload: { lockMinutes: 15 }
+    });
+    const unlocked = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "setAutoSwitchLock",
+      requestId: "req-unlock",
+      accountId: account.id,
+      payload: { lockMinutes: 0 }
+    });
+
+    expect(locked.status).toBe("completed");
+    expect(locked.payload?.notice).toEqual({ level: "info", message: "Auto-switch locked for 15 minutes." });
+    expect(unlocked.status).toBe("completed");
+    expect(unlocked.payload?.notice).toEqual({ level: "info", message: "Auto-switch lock removed." });
+    expect(context.schedulePublishState).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens the VS Code account picker when overview Switch has no preset target", async () => {
+    vi.mocked(vscode.commands.executeCommand).mockReset().mockResolvedValue({ status: "cancelled" });
+    const context = { ...createContext(), hostKind: "webview" as const };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "switch",
+      requestId: "req-switch-picker"
+    });
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith("codexAccounts.switchAccount", undefined);
+    expect(result.status).toBe("completed");
+    expect(result.payload?.notice).toEqual({ level: "warning", message: "Account switch cancelled." });
+    expect(context.schedulePublishState).toHaveBeenCalled();
+  });
+
+  it("requires the browser account picker to supply a switch target", async () => {
+    const result = await executeDashboardActionMessage(
+      { ...createContext(), hostKind: "browser" },
+      {
+        type: "dashboard:action",
+        action: "switch",
+        requestId: "req-browser-switch-missing"
+      }
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/choose an account/i);
+  });
+
+  it("returns a visible reload outcome when the VS Code reload prompt is postponed", async () => {
+    setCurrentWindowRuntimeAccountId("account-before-reload");
+    vi.mocked(vscode.window.showInformationMessage).mockReset().mockResolvedValue("Later" as never);
+    const account = { id: "account-next", email: "next@example.com" };
+    const context = {
+      ...createContext(),
+      hostKind: "webview" as const,
+      repo: { getAccount: vi.fn().mockResolvedValue(account) } as unknown as DashboardActionContext["repo"]
+    };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "reloadPrompt",
+      requestId: "req-reload-later",
+      accountId: account.id
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.payload?.notice?.level).toBe("warning");
+    expect(result.payload?.notice?.message).toMatch(/not started|postponed/i);
+  });
+
+  it("requires in-page confirmation before a browser reload", async () => {
+    setCurrentWindowRuntimeAccountId("account-before-reload");
+    vi.mocked(vscode.commands.executeCommand).mockClear();
+    const account = { id: "account-next", email: "next@example.com" };
+    const context = {
+      ...createContext(),
+      hostKind: "browser" as const,
+      repo: { getAccount: vi.fn().mockResolvedValue(account) } as unknown as DashboardActionContext["repo"]
+    };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "reloadPrompt",
+      requestId: "req-browser-reload-unconfirmed",
+      accountId: account.id
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/confirm the reload/i);
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.restartExtensionHost");
+  });
+
+  it("switches directly for the port dashboard without opening a VS Code picker", async () => {
+    setCurrentWindowRuntimeAccountId("current-window-account");
+    vi.mocked(vscode.commands.executeCommand).mockClear();
+    const account = {
+      id: "browser-target",
+      email: "browser@example.com",
+      isActive: false,
+      tokenRefreshEnabled: false
+    };
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      switchAccount: vi.fn().mockResolvedValue({ ...account, isActive: true }),
+      flush: vi.fn().mockResolvedValue(undefined)
+    } as unknown as DashboardActionContext["repo"];
+    const context = { ...createContext(), repo, hostKind: "browser" as const };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "switch",
+      requestId: "req-browser-switch",
+      accountId: account.id
+    });
+
+    expect(result.status).toBe("completed");
+    expect(repo.switchAccount).toHaveBeenCalledWith(account.id, { forceTokenRefresh: false });
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("codexAccounts.switchAccount", expect.anything());
+    expect(result.payload).toMatchObject({ reloadRequired: true, reloadAccountId: account.id });
+    setCurrentWindowRuntimeAccountId(undefined);
+  });
+
+  it("keeps the VS Code webview switch on the registered VS Code command", async () => {
+    vi.mocked(vscode.commands.executeCommand).mockReset().mockResolvedValue(undefined);
+    const account = { id: "webview-target", email: "webview@example.com", isActive: false };
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      switchAccount: vi.fn(),
+      flush: vi.fn().mockResolvedValue(undefined)
+    } as unknown as DashboardActionContext["repo"];
+
+    const result = await executeDashboardActionMessage(
+      { ...createContext(), repo, hostKind: "webview" },
+      {
+        type: "dashboard:action",
+        action: "switch",
+        requestId: "req-webview-switch",
+        accountId: account.id
+      }
+    );
+
+    expect(result.status).toBe("completed");
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith("codexAccounts.switchAccount", account);
+    expect(repo.switchAccount).not.toHaveBeenCalled();
+  });
+
+  it("requires browser confirmation and removes directly after it is supplied", async () => {
+    vi.mocked(vscode.window.showWarningMessage).mockClear();
+    const account = { id: "remove-target", email: "remove@example.com" };
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      removeAccount: vi.fn().mockResolvedValue(undefined),
+      flush: vi.fn().mockResolvedValue(undefined)
+    } as unknown as DashboardActionContext["repo"];
+    const context = { ...createContext(), repo, hostKind: "browser" as const };
+
+    const unconfirmed = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "remove",
+      requestId: "req-browser-remove-unconfirmed",
+      accountId: account.id
+    });
+    const confirmed = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "remove",
+      requestId: "req-browser-remove-confirmed",
+      accountId: account.id,
+      payload: { confirmed: true }
+    });
+
+    expect(unconfirmed.status).toBe("failed");
+    expect(confirmed.status).toBe("completed");
+    expect(repo.removeAccount).toHaveBeenCalledTimes(1);
+    expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(confirmed.payload?.notice?.message).toContain("remove@example.com");
+  });
+
+  it("uses the port host encrypted-sync callbacks instead of VS Code prompts", async () => {
+    vi.mocked(vscode.commands.executeCommand).mockClear();
+    const configureEncryptedSync = vi.fn().mockResolvedValue(true);
+    const context = {
+      ...createContext(),
+      hostKind: "browser" as const,
+      configureEncryptedSync
+    };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "configureEncryptedSync",
+      requestId: "req-browser-configure-sync",
+      payload: { passphrase: "secret-passphrase", passphraseConfirmation: "secret-passphrase" }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(configureEncryptedSync).toHaveBeenCalledWith("secret-passphrase", "secret-passphrase");
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("codexAccounts.configureEncryptedSync");
+    expect(result.payload?.notice?.message).toMatch(/configured/i);
+  });
+
+  it("does not block a reload prompt when another window already has the same action in flight", async () => {
+    const blocker = new CrossWindowOperationCoordinator(operationDirectory);
+    let releaseBlocker!: () => void;
+    let blockerStarted!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      blockerStarted = resolve;
+    });
+    const heldAction = blocker.runExclusive("dashboard:reloadPrompt:account-1", "Reload prompt", async () => {
+      blockerStarted();
+      await blocked;
+    });
+    await started;
+
+    setCurrentWindowRuntimeAccountId("account-before-reload");
+    vi.mocked(vscode.window.showInformationMessage).mockResolvedValue("Later" as never);
+    const account = { id: "account-1", email: "dev@example.com" };
+    const context = {
+      ...createContext(),
+      repo: {
+        getAccount: vi.fn().mockResolvedValue(account)
+      } as unknown as DashboardActionContext["repo"]
+    };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "reloadPrompt",
+      requestId: "req-reload-unblocked",
+      accountId: account.id
+    });
+
+    expect(result.status).toBe("completed");
+    expect(vscode.window.showInformationMessage).toHaveBeenCalled();
+    releaseBlocker();
+    await heldAction;
+  });
+
   it("forces a panel state publish for refreshView", async () => {
     const publishState = vi.fn().mockResolvedValue(undefined);
     const result = await executeDashboardActionMessage(
@@ -84,7 +422,377 @@ describe("executeDashboardActionMessage", () => {
       }
     );
 
-    expect(executeCommandMock).toHaveBeenCalledWith("codexAccounts.refreshQuota", expect.objectContaining({ id: "account-1" }));
+    expect(executeCommandMock).toHaveBeenCalledWith(
+      "codexAccounts.refreshQuota",
+      expect.objectContaining({ id: "account-1" })
+    );
     expect(result.status).toBe("completed");
   });
+
+  it("keeps dashboard refresh separate from encrypted sync when enabled", async () => {
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValueOnce({
+      get: (key: string, fallback?: unknown) => (key === "encryptedSyncEnabled" ? true : fallback)
+    } as unknown as vscode.WorkspaceConfiguration);
+    const context = createContext();
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "refreshView",
+      requestId: "req-global-refresh"
+    });
+
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("codexAccounts.syncNow");
+    expect(context.publishState).toHaveBeenCalledWith(true);
+    expect(result.status).toBe("completed");
+    expect(result.payload?.notice).toBeUndefined();
+  });
+
+  it("uses the refreshed dashboard state as quota refresh feedback", async () => {
+    const context = createContext();
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "refreshAll",
+      requestId: "req-quota-refresh"
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.payload?.notice).toBeUndefined();
+  });
+
+  it("reports an inconclusive manual encrypted sync as a failed action", async () => {
+    vi.mocked(vscode.commands.executeCommand).mockResolvedValue(false);
+    const context = createContext();
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "syncNow",
+      requestId: "req-sync"
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/did not complete/i);
+    expect(context.schedulePublishState).toHaveBeenCalled();
+  });
+
+  it("reports cancelled passphrase setup instead of completing silently", async () => {
+    vi.mocked(vscode.commands.executeCommand).mockResolvedValue(false);
+    const context = createContext();
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "configureEncryptedSync",
+      requestId: "req-configure-sync"
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/passphrase was not set/i);
+    expect(context.schedulePublishState).toHaveBeenCalled();
+  });
+
+  it("reports stale and missing account targets instead of completing silently", async () => {
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(undefined)
+    } as unknown as DashboardActionContext["repo"];
+
+    const missingTarget = await executeDashboardActionMessage(
+      { ...createContext(), repo },
+      {
+        type: "dashboard:action",
+        action: "refresh",
+        requestId: "req-missing-target"
+      }
+    );
+    const staleTarget = await executeDashboardActionMessage(
+      { ...createContext(), repo },
+      {
+        type: "dashboard:action",
+        action: "refresh",
+        requestId: "req-stale-target",
+        accountId: "deleted-account"
+      }
+    );
+
+    expect(missingTarget.status).toBe("failed");
+    expect(missingTarget.errorMessage).toMatch(/requires an account/i);
+    expect(staleTarget.status).toBe("failed");
+    expect(staleTarget.errorMessage).toMatch(/no longer exists/i);
+  });
+
+  it("reports invalid action input instead of completing silently", async () => {
+    const result = await executeDashboardActionMessage(createContext(), {
+      type: "dashboard:action",
+      action: "copyText",
+      requestId: "req-copy"
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/no text/i);
+  });
+
+  it("updates account claim enablement and republishes dashboard state", async () => {
+    vi.mocked(vscode.workspace.getConfiguration)
+      .mockReset()
+      .mockReturnValue({
+        get: (_key: string, fallback?: unknown) => fallback
+      } as unknown as vscode.WorkspaceConfiguration);
+    vi.mocked(vscode.commands.executeCommand).mockReset().mockResolvedValue(undefined);
+    const account = { id: "account-1", email: "dev@example.com", enabled: false };
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      setAccountEnabled: vi.fn().mockResolvedValue({ ...account, enabled: true })
+    } as unknown as DashboardActionContext["repo"];
+    const context = { ...createContext(), repo };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "toggleAccountEnabled",
+      requestId: "req-enable",
+      accountId: account.id
+    });
+
+    expect(repo.setAccountEnabled).toHaveBeenCalledWith(account.id, true);
+    expect(context.schedulePublishState).toHaveBeenCalled();
+    expect(result.status).toBe("completed");
+    expect(result.payload?.notice).toBeUndefined();
+  });
+
+  it("completes an account toggle without waiting for encrypted sync", async () => {
+    vi.mocked(vscode.workspace.getConfiguration)
+      .mockReset()
+      .mockReturnValue({
+        get: (key: string, fallback?: unknown) => (key === "encryptedSyncEnabled" ? true : fallback)
+      } as unknown as vscode.WorkspaceConfiguration);
+    vi.mocked(vscode.commands.executeCommand).mockReset().mockResolvedValue(true);
+    const account = { id: "account-1", email: "dev@example.com", enabled: true };
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      setAccountEnabled: vi.fn().mockResolvedValue({ ...account, enabled: false })
+    } as unknown as DashboardActionContext["repo"];
+    const context = { ...createContext(), repo };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "toggleAccountEnabled",
+      requestId: "req-disable-sync",
+      accountId: account.id
+    });
+
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("codexAccounts.syncNow", expect.anything());
+    expect(result.status).toBe("completed");
+    expect(result.payload?.notice).toBeUndefined();
+  });
+
+  it("does not block an account toggle while a background account task is running", async () => {
+    const blocker = new CrossWindowOperationCoordinator(operationDirectory);
+    const account = { id: "account-toggle", email: "toggle@example.com", enabled: true };
+    let release!: () => void;
+    let started!: () => void;
+    const startedPromise = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const held = blocker.runExclusive(`background:quota-refresh:${account.id}`, "Quota refresh", async () => {
+      started();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    await startedPromise;
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      setAccountEnabled: vi.fn().mockResolvedValue({ ...account, enabled: false })
+    } as unknown as DashboardActionContext["repo"];
+
+    const result = await executeDashboardActionMessage({ ...createContext(), repo }, {
+      type: "dashboard:action",
+      action: "toggleAccountEnabled",
+      requestId: "req-toggle-background-busy",
+      accountId: account.id
+    });
+
+    expect(result.status).toBe("completed");
+    expect(repo.setAccountEnabled).toHaveBeenCalledWith(account.id, false);
+    release();
+    await held;
+  });
+
+  it("completes an account toggle locally when another window already owns sync", async () => {
+    vi.mocked(vscode.workspace.getConfiguration)
+      .mockReset()
+      .mockReturnValue({
+        get: (key: string, fallback?: unknown) => (key === "encryptedSyncEnabled" ? true : fallback)
+      } as unknown as vscode.WorkspaceConfiguration);
+    vi.mocked(vscode.commands.executeCommand)
+      .mockReset()
+      .mockRejectedValue(new CrossWindowOperationBusyError("Encrypted account sync"));
+    const account = { id: "account-1", email: "dev@example.com", enabled: true };
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      setAccountEnabled: vi.fn().mockResolvedValue({ ...account, enabled: false })
+    } as unknown as DashboardActionContext["repo"];
+    const context = { ...createContext(), repo };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "toggleAccountEnabled",
+      requestId: "req-disable-sync-busy",
+      accountId: account.id
+    });
+
+    expect(repo.setAccountEnabled).toHaveBeenCalledWith(account.id, false);
+    expect(context.schedulePublishState).toHaveBeenCalled();
+    expect(result.status).toBe("completed");
+    expect(result.payload?.notice).toBeUndefined();
+  });
+
+  it("returns account claim enablement failures to the dashboard", async () => {
+    const account = { id: "account-1", email: "dev@example.com", enabled: true };
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      setAccountEnabled: vi.fn().mockRejectedValue(new Error("local index is read-only"))
+    } as unknown as DashboardActionContext["repo"];
+    const context = { ...createContext(), repo };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "toggleAccountEnabled",
+      requestId: "req-disable",
+      accountId: account.id
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/read-only/i);
+    expect(context.schedulePublishState).toHaveBeenCalled();
+  });
+
+  it("returns password-gated claim bypass outcomes to the dashboard", async () => {
+    const context = createContext();
+    vi.mocked(vscode.commands.executeCommand).mockResolvedValueOnce(true);
+
+    const enabled = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "setEncryptedSyncRegistryOverride",
+      requestId: "req-bypass-on",
+      payload: { enabled: true }
+    });
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith("codexAccounts.setEncryptedSyncRegistryOverride", true);
+    expect(enabled.status).toBe("completed");
+    expect(enabled.payload?.notice).toBeUndefined();
+    expect(context.schedulePublishState).toHaveBeenCalled();
+
+    vi.mocked(vscode.commands.executeCommand).mockResolvedValueOnce(true);
+    const disabled = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "setEncryptedSyncRegistryOverride",
+      requestId: "req-bypass-off",
+      payload: { enabled: false }
+    });
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith("codexAccounts.setEncryptedSyncRegistryOverride", false);
+    expect(disabled.status).toBe("completed");
+    expect(disabled.payload?.notice).toBeUndefined();
+
+    vi.mocked(vscode.commands.executeCommand).mockResolvedValueOnce(false);
+    const rejected = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "setEncryptedSyncRegistryOverride",
+      requestId: "req-bypass-rejected",
+      payload: { enabled: true }
+    });
+
+    expect(rejected.status).toBe("failed");
+    expect(rejected.errorMessage).toMatch(/not enabled/i);
+  });
+
+  it("allows duplicate refresh-view requests while another window is refreshing", async () => {
+    const context = createContext();
+    context.publishState = vi.fn().mockResolvedValue(undefined);
+
+    const first = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "refreshView",
+      requestId: "req-refresh-first"
+    });
+    const duplicate = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "refreshView",
+      requestId: "req-refresh-duplicate"
+    });
+
+    expect(first.status).toBe("completed");
+    expect(duplicate.status).toBe("completed");
+    expect(context.publishState).toHaveBeenCalledTimes(2);
+  });
+
+  it("loads daily usage only for an explicit account action and caps the requested window", async () => {
+    const context = createContext();
+    context.context = {
+      globalState: {
+        get: vi.fn().mockReturnValue([]),
+        update: vi.fn().mockResolvedValue(undefined)
+      }
+    } as unknown as DashboardActionContext["context"];
+    const account = { id: "usage-account", email: "usage@example.com" };
+    context.repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      getTokens: vi.fn().mockResolvedValue({
+        accessToken: "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.",
+        idToken: "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0."
+      })
+    } as unknown as DashboardActionContext["repo"];
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ days: 30, daily_usage: [{ date: "2026-08-28", total_tokens: 42 }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "getDailyUsage",
+      accountId: account.id,
+      requestId: "req-daily-usage",
+      payload: { days: 365 }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.payload?.dailyUsage?.points[0]?.totalTokens).toBe(42);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("days=30");
+    vi.unstubAllGlobals();
+  });
+
+  it("returns a visible failure when daily usage has no access token", async () => {
+    const context = createContext();
+    context.repo = {
+      getAccount: vi.fn().mockResolvedValue({ id: "usage-account", email: "usage@example.com" }),
+      getTokens: vi.fn().mockResolvedValue(undefined)
+    } as unknown as DashboardActionContext["repo"];
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "getDailyUsage",
+      accountId: "usage-account",
+      requestId: "req-daily-usage-missing-token"
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/access token/i);
+  });
 });
+
+function createContext(): DashboardActionContext {
+  return {
+    context: {} as DashboardActionContext["context"],
+    repo: {} as DashboardActionContext["repo"],
+    resolveLanguage: () => "en",
+    schedulePublishState: vi.fn(),
+    publishState: vi.fn(),
+    oauth: {} as DashboardActionContext["oauth"],
+    announcements: {} as DashboardActionContext["announcements"],
+    getAnnouncementOptions: () => ({
+      version: "0.1.19",
+      locale: "en"
+    })
+  };
+}

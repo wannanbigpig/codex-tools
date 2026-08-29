@@ -20,6 +20,9 @@ import {
   dismissAccountHealthIssue,
   removeAccountFromIndex,
   removeAccountTags as removeAccountTagsFromIndex,
+  setAccountEnabled as setAccountEnabledOnIndex,
+  setAccountQueuePriority as setAccountQueuePriorityOnIndex,
+  setAccountTokenRefreshEnabled as setAccountTokenRefreshEnabledOnIndex,
   setAccountTags as setAccountTagsOnIndex,
   setStatusBarVisibility as setStatusBarVisibilityOnIndex,
   switchActiveAccount
@@ -31,7 +34,12 @@ import {
   syncLoginAtFromTokens
 } from "./accountProfileMaintenance";
 import { buildAccountRecordDraft, reconcileStatusBarSelections } from "./accountMetadata";
-import { previewSharedEntry, restoreSharedTokens, toSharedAccountJson } from "./sharedAccounts";
+import {
+  previewSharedEntry,
+  resolveSharedAccountIdentity,
+  restoreSharedTokens,
+  toSharedAccountJson
+} from "./sharedAccounts";
 import {
   applySharedAccountEntry,
   createSharedImportIssue,
@@ -58,8 +66,8 @@ import {
   persistIndexWithBackups,
   readPendingOrCachedIndex
 } from "./accountsWriteCoordinator";
-import { readAuthFile, writeAuthFile } from "../codex";
-import { needsRefresh, refreshTokens, TOKEN_REFRESH_SKEW_SECONDS } from "../auth/oauth";
+import { buildCodexAuthFile, ensureCodexAuthFileFormat, readAuthFile, writeAuthFile } from "../codex";
+import { refreshTokens } from "../auth/oauth";
 import { createKeyedMutex } from "../utils/concurrency";
 import {
   CodexAccountRecord,
@@ -85,6 +93,11 @@ import {
 import { buildAccountStorageId } from "../utils/accountIdentity";
 import { extractClaims, isTokenExpired } from "../utils/jwt";
 import { getQuotaIssueKind } from "../utils/quotaIssue";
+import {
+  CrossWindowOperationBusyError,
+  runCrossWindowExclusive,
+  runCentralAccountOperationWithCooldown
+} from "../utils/crossWindowOperations";
 import { AccountError, StorageError, createError, ErrorCode } from "../core/errors";
 import {
   AideckMirrorTokenSnapshot,
@@ -117,6 +130,17 @@ type TokenCacheEntry = {
   cachedAt: number;
 };
 
+export interface AccountSwitchCoordinator {
+  prepareAccountSwitch(accountId: string): Promise<void>;
+  completeAccountSwitch(accountId: string): Promise<void>;
+  cancelAccountSwitch(accountId: string): Promise<void>;
+  onAccountsMutated?(change: { addedAccountIds: string[]; removedAccountIds: string[] }): void;
+  prepareAccountEnablement?(accountId: string, enabled: boolean): Promise<void>;
+  completeAccountEnablement?(accountId: string, enabled: boolean): Promise<void>;
+  /** Prevent compatibility-mirror imports from bypassing a synced deletion. */
+  isAccountDeletionPending?(accountId: string): boolean;
+}
+
 export class AccountsRepository {
   private readonly secretStore: SecretStore;
   private readonly indexPath: string;
@@ -125,9 +149,11 @@ export class AccountsRepository {
   private readonly accountMutex = createKeyedMutex();
   /** getTokens 内存缓存，减少 SecretStore/Keychain 重复读取 */
   private readonly tokenCache = new Map<string, TokenCacheEntry>();
+  private switchCoordinator: AccountSwitchCoordinator | undefined;
 
   /** 防止重复释放 */
   private disposed = false;
+  private startupSyncTimer: NodeJS.Timeout | undefined;
 
   /** 任何 token 写入后清空整个缓存，下次 getTokens 重新从 SecretStore 读取 */
   private invalidateTokenCache(): void {
@@ -146,7 +172,7 @@ export class AccountsRepository {
    * - 创建存储目录
    * - 同步激活账号状态
    */
-  async init(): Promise<void> {
+  async init(options: { deferSync?: boolean } = {}): Promise<{ authSyncCompleted: boolean; mirrorSyncCompleted: boolean }> {
     try {
       await fs.mkdir(this.context.globalStorageUri.fsPath, { recursive: true });
     } catch (cause) {
@@ -154,18 +180,35 @@ export class AccountsRepository {
     }
 
     try {
-      await this.syncActiveAccountFromAuthFile();
-      await this.syncFromAideckMirror();
+      await ensureCodexAuthFileFormat().catch((error: unknown) => {
+        console.warn("[codexAccounts] unable to migrate the active auth.json format:", error);
+      });
+      if (options.deferSync) {
+        return { authSyncCompleted: true, mirrorSyncCompleted: true };
+      }
+      await runCrossWindowExclusive("background:account-auth-sync", "Account auth sync", () =>
+        this.runAndFlush(() => this.syncActiveAccountFromAuthFileInternal())
+      );
+      await runCrossWindowExclusive("background:account-mirror-sync", "Account mirror sync", () =>
+        this.runAndFlush(() => this.syncFromAideckMirrorInternal())
+      );
+      return { authSyncCompleted: true, mirrorSyncCompleted: true };
     } catch (cause) {
       if (isIndexHealthError(cause)) {
         console.error("[codexAccounts] accounts index init failed:", cause);
-        return;
+        return { authSyncCompleted: false, mirrorSyncCompleted: false };
       }
       throw cause;
     }
   }
 
   async syncFromAideckMirror(): Promise<CodexAccountRecord[]> {
+    return runCrossWindowExclusive("background:account-mirror-sync", "Account mirror sync", () =>
+      this.runAndFlush(() => this.syncFromAideckMirrorInternal())
+    );
+  }
+
+  private async syncFromAideckMirrorInternal(): Promise<CodexAccountRecord[]> {
     const sharedAccounts = await listAideckCodexSharedAccounts();
     if (sharedAccounts.length === 0) {
       return [];
@@ -185,7 +228,10 @@ export class AccountsRepository {
     const missing = sharedAccounts.filter((entry) => {
       try {
         const preview = previewSharedEntry(entry);
-        return Boolean(preview.storageId && !existingIds.has(preview.storageId));
+        if (!preview.storageId || existingIds.has(preview.storageId)) {
+          return false;
+        }
+        return !this.switchCoordinator?.isAccountDeletionPending?.(preview.storageId);
       } catch {
         return false;
       }
@@ -210,9 +256,59 @@ export class AccountsRepository {
       return;
     }
     this.disposed = true;
-    disposeWriteCoordinator(this.state, (index) => {
-      this.persistIndexSync(index);
-    });
+    if (this.startupSyncTimer) {
+      clearTimeout(this.startupSyncTimer);
+      this.startupSyncTimer = undefined;
+    }
+    try {
+      disposeWriteCoordinator(this.state, (index) => {
+        this.persistIndexSync(index);
+      });
+    } catch (error) {
+      // Deactivation is best-effort. A write owned by another VS Code window
+      // must not escape and fail the entire extension host shutdown.
+      console.error("[codexAccounts] final account index flush failed during deactivation:", error);
+    }
+  }
+
+  scheduleStartupSync(onComplete: () => void, delayMs = 5_000): void {
+    if (this.startupSyncTimer || this.disposed) return;
+    this.startupSyncTimer = setTimeout(() => {
+      this.startupSyncTimer = undefined;
+      void runCentralAccountOperationWithCooldown("Deferred startup account sync", 5 * 60 * 1000, async () => {
+        await this.syncActiveAccountFromAuthFile();
+        await this.syncFromAideckMirror();
+      })
+        .then(() => {
+          // Even when another window already completed the cooldown-protected
+          // sync, refresh this window from the shared index.
+          onComplete();
+        })
+        .catch((error: unknown) => {
+          console.warn("[codexAccounts] deferred startup account sync skipped:", error);
+          // Give the owning window a moment to flush the shared index, then
+          // refresh this window without attempting another sync.
+          const refreshTimer = setTimeout(onComplete, 1_000);
+          refreshTimer.unref?.();
+          if (!(error instanceof CrossWindowOperationBusyError)) {
+            // A genuine failure (rather than another window owning the work)
+            // can recover automatically, but never more often than the global
+            // five-minute sync cooldown.
+            this.scheduleStartupSync(onComplete, 5 * 60 * 1000);
+          }
+        });
+    }, delayMs);
+    this.startupSyncTimer.unref?.();
+  }
+
+  /** Persist all debounced account-index changes before a cross-window action releases its lock. */
+  async flush(): Promise<void> {
+    if (this.state.saveDebounceTimer) {
+      clearTimeout(this.state.saveDebounceTimer);
+      this.state.saveDebounceTimer = null;
+    }
+    await this.flushPendingSave();
+    await this.state.persistChain;
   }
 
   /**
@@ -227,6 +323,17 @@ export class AccountsRepository {
       }
       throw error;
     }
+  }
+
+  /**
+   * Drop this host's short-lived index cache after another VS Code window
+   * replaces the shared accounts-index.json. Pending local writes always win.
+   */
+  invalidateCachedIndex(): void {
+    if (this.state.pendingSave || this.state.isDirty) {
+      return;
+    }
+    this.state.cache = null;
   }
 
   /**
@@ -337,12 +444,12 @@ export class AccountsRepository {
    */
   async getTokens(
     accountId: string,
-    options: { syncExternal?: boolean } = {}
+    options: { syncExternal?: boolean; bypassCache?: boolean } = {}
   ): Promise<CodexTokens | undefined> {
     try {
       // 内存缓存命中直接返回，避免 Dashboard 刷新时重复读 Keychain
       const cached = this.tokenCache.get(accountId);
-      if (cached && Date.now() - cached.cachedAt < TOKEN_CACHE_TTL_MS) {
+      if (!options.bypassCache && cached && Date.now() - cached.cachedAt < TOKEN_CACHE_TTL_MS) {
         return cached.tokens;
       }
 
@@ -549,17 +656,37 @@ export class AccountsRepository {
       persistImmediately?: boolean;
       restoreSource?: CodexAccountsRestoreResult["source"];
       addedVia?: CodexAccountRecord["addedVia"];
+      identityFallback?: {
+        email?: string;
+        accountId?: string;
+        organizationId?: string;
+      };
     } = {}
   ): Promise<CodexAccountRecord> {
-    const claims = extractClaims(tokens.idToken, tokens.accessToken);
-    if (!claims.email) {
+    let claims: ReturnType<typeof extractClaims>;
+    try {
+      claims = extractClaims(tokens.idToken, tokens.accessToken);
+    } catch (error) {
+      // Shared exports from older clients can contain an opaque/non-JWT ID
+      // token. If the export includes its own account identity, keep the
+      // import actionable instead of labeling the account invalid solely due
+      // to a token format that is not needed for storage.
+      if (!options.identityFallback?.email) {
+        throw error;
+      }
+      claims = {};
+    }
+    const email = claims.email ?? options.identityFallback?.email;
+    if (!email) {
       throw new AccountError("Unable to extract email from id_token", {
         code: ErrorCode.ACCOUNT_INVALID_DATA
       });
     }
     const claimsWithEmail = {
       ...claims,
-      email: claims.email
+      email,
+      accountId: claims.accountId ?? tokens.accountId ?? options.identityFallback?.accountId,
+      organizationId: claims.organizationId ?? options.identityFallback?.organizationId
     };
 
     // 异步获取远程配置，不阻塞主要流程
@@ -572,7 +699,7 @@ export class AccountsRepository {
 
     const index = options.allowRecoveryWrite ? await this.readIndexForRecovery() : await this.readIndex();
     const previousActiveId = index.currentAccountId;
-    const id = buildAccountStorageId(claimsWithEmail.email, claims.accountId, claims.organizationId);
+    const id = buildAccountStorageId(claimsWithEmail.email, claimsWithEmail.accountId, claimsWithEmail.organizationId);
     const existing = index.accounts.find((item) => item.id === id);
     const now = Date.now();
     const account = buildAccountRecordDraft({
@@ -673,6 +800,18 @@ export class AccountsRepository {
     return sharedAccounts;
   }
 
+  setAccountSwitchCoordinator(coordinator: AccountSwitchCoordinator): void {
+    this.switchCoordinator = coordinator;
+  }
+
+  async exportAuthFile(accountId: string): Promise<string | undefined> {
+    const account = await this.getAccount(accountId);
+    if (!account) return undefined;
+    const tokens = await this.secretStore.getTokens(account.id);
+    if (!tokens?.idToken || !tokens.accessToken) return undefined;
+    return JSON.stringify(buildCodexAuthFile(tokens), null, 2);
+  }
+
   async importSharedAccounts(input: SharedCodexAccountJson | SharedCodexAccountJson[]): Promise<CodexAccountRecord[]> {
     return this.importSharedAccountsInternal(input);
   }
@@ -724,10 +863,20 @@ export class AccountsRepository {
 
     for (const entry of entries) {
       const restoredTokens = restoreSharedTokens(entry);
+      const identityFallback = resolveSharedAccountIdentity(entry);
+      const incomingStorageId = previewSharedEntry(entry).storageId;
+      const beforeImportIndex = options.allowRecoveryWrite ? await this.readIndexForRecovery() : await this.readIndex();
+      const accountExistedBeforeImport = Boolean(
+        incomingStorageId && beforeImportIndex.accounts.some((account) => account.id === incomingStorageId)
+      );
+      const previousTokens = incomingStorageId ? await this.secretStore.getTokens(incomingStorageId) : undefined;
+      const credentialsChanged =
+        accountExistedBeforeImport && (!previousTokens || !areTokenCredentialsEqual(previousTokens, restoredTokens));
       const created = await this.upsertFromTokensInternal(restoredTokens, false, {
         allowRecoveryWrite: options.allowRecoveryWrite,
         persistImmediately: false,
-        addedVia: "json"
+        addedVia: "json",
+        identityFallback
       });
       const index = options.allowRecoveryWrite ? await this.readIndexForRecovery() : await this.readIndex();
       const account = index.accounts.find((item) => item.id === created.id);
@@ -736,6 +885,15 @@ export class AccountsRepository {
       }
 
       applySharedAccountEntry(account, entry);
+      // Encrypted sync intentionally omits device-local quota errors. When it
+      // delivers genuinely different credentials, an auth error produced by
+      // the replaced token is stale and must not keep this PC in Reauthorize.
+      // Preserve quota and service errors, and do nothing for an unchanged
+      // import so a still-invalid credential remains visible.
+      if (credentialsChanged && getQuotaIssueKind(account.quotaError) === "auth") {
+        account.quotaError = undefined;
+        account.dismissedHealthIssueKey = undefined;
+      }
 
       const storedTokens = {
         ...restoredTokens,
@@ -762,12 +920,23 @@ export class AccountsRepository {
    * @param accountId - 目标账号 ID
    * @returns 切换后的账号记录
    */
-  async switchAccount(accountId: string): Promise<CodexAccountRecord> {
+  async switchAccount(accountId: string, options: { forceTokenRefresh?: boolean } = {}): Promise<CodexAccountRecord> {
     // 按账号串行化，避免切号与后台续期并发刷新同一账号 token
-    return this.accountMutex.runExclusive(accountId, () => this.switchAccountLocked(accountId));
+    return this.accountMutex.runExclusive(accountId, async () => {
+      await this.switchCoordinator?.prepareAccountSwitch(accountId);
+      let account: CodexAccountRecord;
+      try {
+        account = await this.switchAccountLocked(accountId, options.forceTokenRefresh === true);
+      } catch (error) {
+        await this.switchCoordinator?.cancelAccountSwitch(accountId);
+        throw error;
+      }
+      await this.switchCoordinator?.completeAccountSwitch(accountId);
+      return account;
+    });
   }
 
-  private async switchAccountLocked(accountId: string): Promise<CodexAccountRecord> {
+  private async switchAccountLocked(accountId: string, forceTokenRefresh = false): Promise<CodexAccountRecord> {
     const index = await this.readIndex();
     const account = index.accounts.find((item) => item.id === accountId);
 
@@ -783,18 +952,27 @@ export class AccountsRepository {
     }
 
     // 切号前按需刷新 token，避免写入过期 token 导致 codex 登录失败（对齐 cockpit switch_account_managed）
-    let effectiveTokens = {
+    const effectiveTokens = {
       ...tokens,
       accountId: account.accountId ?? tokens.accountId
     };
 
-    if (tokens.refreshToken && needsRefresh(tokens.accessToken, TOKEN_REFRESH_SKEW_SECONDS)) {
-      const refreshed = await refreshTokens(tokens.refreshToken, tokens.idToken);
-      effectiveTokens = {
-        ...refreshed,
-        accountId: refreshed.accountId ?? account.accountId ?? tokens.accountId
+    let backgroundRotation: (() => Promise<void>) | undefined;
+    if (forceTokenRefresh && tokens.refreshToken) {
+      // Manual switching must remain immediate. Rotate in the background after
+      // the new auth file is written; updateTokens will rewrite auth.json only
+      // if this account is still active when the rotation completes.
+      backgroundRotation = async () => {
+        try {
+          const refreshed = await refreshTokens(tokens.refreshToken!, tokens.idToken);
+          await this.updateTokens(accountId, {
+            ...refreshed,
+            accountId: refreshed.accountId ?? account.accountId ?? tokens.accountId
+          });
+        } catch (error) {
+          console.warn(`[codexAccounts] token rotation failed after switching ${account.email}:`, error);
+        }
       };
-      await this.updateTokens(accountId, effectiveTokens);
     }
 
     await writeAuthFile(effectiveTokens);
@@ -807,6 +985,9 @@ export class AccountsRepository {
     await mirrorAideckCodexAccount(nextAccount, effectiveTokens);
     await mirrorAideckCurrentAccount(accountId);
     this.writeIndex(index);
+    if (backgroundRotation) {
+      void backgroundRotation();
+    }
 
     return nextAccount;
   }
@@ -843,6 +1024,54 @@ export class AccountsRepository {
     }
     this.writeIndex(index);
 
+    return account;
+  }
+
+  /** Include or exclude a saved account from automated work on this PC only. */
+  async setAccountEnabled(accountId: string, enabled: boolean): Promise<CodexAccountRecord> {
+    await this.switchCoordinator?.prepareAccountEnablement?.(accountId, enabled);
+    const index = await this.readIndex();
+    const account = setAccountEnabledOnIndex(index, accountId, enabled, Date.now());
+
+    if (!account) {
+      throw createError.accountNotFound(accountId);
+    }
+    // Enablement remains local in the account index. Encrypted sync publishes
+    // only the ownership registry, never this machine-specific field itself.
+    this.writeIndex(index, { notifyAccountSync: false });
+    await this.switchCoordinator?.completeAccountEnablement?.(accountId, enabled);
+    return account;
+  }
+
+  /** Apply synchronized ownership without recursively publishing another claim. */
+  async setAccountEnabledFromSync(accountId: string, enabled: boolean): Promise<CodexAccountRecord> {
+    const index = await this.readIndex();
+    const account = setAccountEnabledOnIndex(index, accountId, enabled, Date.now());
+    if (!account) throw createError.accountNotFound(accountId);
+    this.writeIndex(index, { notifyAccountSync: false });
+    return account;
+  }
+
+  /** Set whether this PC prioritizes an account in its automatic switching queue. */
+  async setAccountQueuePriority(accountId: string, queuePriority: boolean): Promise<CodexAccountRecord> {
+    const index = await this.readIndex();
+    const account = setAccountQueuePriorityOnIndex(index, accountId, queuePriority, Date.now());
+
+    if (!account) {
+      throw createError.accountNotFound(accountId);
+    }
+    this.writeIndex(index, { notifyAccountSync: false });
+    return account;
+  }
+
+  /** Enable or disable background token refresh for one account. */
+  async setAccountTokenRefreshEnabled(accountId: string, enabled: boolean): Promise<CodexAccountRecord> {
+    const index = await this.readIndex();
+    const account = setAccountTokenRefreshEnabledOnIndex(index, accountId, enabled, Date.now());
+    if (!account) {
+      throw createError.accountNotFound(accountId);
+    }
+    this.writeIndex(index);
     return account;
   }
 
@@ -887,28 +1116,21 @@ export class AccountsRepository {
     }
 
     if (storedTokens && shouldAttemptRemoteProfileRepair(account, effectivePlanType)) {
-      // 后台异步拉取远程档案，不阻塞配额刷新
-      void fetchRemoteAccountProfile(storedTokens)
-        .then(async (remoteProfile) => {
-          if (!remoteProfile) {
-            return;
-          }
-          const freshIndex = await this.readIndex();
-          const freshAccount = freshIndex.accounts.find((item) => item.id === account.id);
-          if (freshAccount) {
-            applyRemoteProfileFromTokens({
-              account: freshAccount,
-              tokens: storedTokens,
-              remoteProfile,
-              planType: effectivePlanType
-            });
-            this.writeIndex(freshIndex);
-          }
-        })
-        .catch(() => undefined);
+      // Keep profile repair in the same central operation so it cannot write
+      // an older index snapshot after another VS Code window starts an action.
+      const remoteProfile = await fetchRemoteAccountProfile(storedTokens).catch(() => undefined);
+      if (remoteProfile) {
+        applyRemoteProfileFromTokens({
+          account,
+          tokens: storedTokens,
+          remoteProfile,
+          planType: effectivePlanType
+        });
+      }
     }
 
-    const nextStoredTokens = updatedTokens ?? (account.accountId !== previousStoredAccountId ? storedTokens : undefined);
+    const nextStoredTokens =
+      updatedTokens ?? (account.accountId !== previousStoredAccountId ? storedTokens : undefined);
     if (storedTokens && nextStoredTokens) {
       const effectiveNextTokens = {
         ...nextStoredTokens,
@@ -938,6 +1160,12 @@ export class AccountsRepository {
    * 同步激活账号状态 (从 auth.json)
    */
   async syncActiveAccountFromAuthFile(): Promise<void> {
+    await runCrossWindowExclusive("background:account-auth-sync", "Account auth sync", () =>
+      this.runAndFlush(() => this.syncActiveAccountFromAuthFileInternal())
+    );
+  }
+
+  private async syncActiveAccountFromAuthFileInternal(): Promise<void> {
     const auth = await readAuthFile();
     const index = await this.readIndex();
     const previousActiveId = index.currentAccountId;
@@ -987,6 +1215,14 @@ export class AccountsRepository {
 
     if (changed) {
       this.writeIndex(index);
+    }
+  }
+
+  private async runAndFlush<T>(task: () => Promise<T>): Promise<T> {
+    try {
+      return await task();
+    } finally {
+      await this.flush();
     }
   }
 
@@ -1080,11 +1316,7 @@ export class AccountsRepository {
   /**
    * 更新重置次数快照（由后台 fetchResetCredits 拉取后调用）。
    */
-  async updateResetCreditsSnapshot(
-    accountId: string,
-    availableCount: number,
-    nextExpiresAt?: number
-  ): Promise<void> {
+  async updateResetCreditsSnapshot(accountId: string, availableCount: number, nextExpiresAt?: number): Promise<void> {
     const index = await this.readIndex();
     const account = index.accounts.find((item) => item.id === accountId);
     if (!account?.quotaSummary) {
@@ -1138,9 +1370,7 @@ export class AccountsRepository {
    */
   private async readIndex(): Promise<CodexAccountsIndex> {
     if (this.state.indexHealth.status === "corrupted_unrecoverable") {
-      throw createError.storageWriteBlocked(
-        "Accounts index is corrupted and must be restored before continuing."
-      );
+      throw createError.storageWriteBlocked("Accounts index is corrupted and must be restored before continuing.");
     }
 
     const cached = readPendingOrCachedIndex(this.state, CACHE_TTL_MS);
@@ -1187,8 +1417,17 @@ export class AccountsRepository {
   /**
    * 写入索引 (带防抖)
    */
-  private writeIndex(index: CodexAccountsIndex): void {
+  private writeIndex(index: CodexAccountsIndex, options: { notifyAccountSync?: boolean } = {}): void {
     assertWriteAllowed(this.state);
+    const previousIndex = this.state.pendingSave ?? this.state.cache?.data;
+    const previousIds = new Set(previousIndex?.accounts.map((account) => account.id) ?? []);
+    const nextIds = new Set(index.accounts.map((account) => account.id));
+    if (options.notifyAccountSync !== false) {
+      this.switchCoordinator?.onAccountsMutated?.({
+        addedAccountIds: [...nextIds].filter((accountId) => !previousIds.has(accountId)),
+        removedAccountIds: [...previousIds].filter((accountId) => !nextIds.has(accountId))
+      });
+    }
     markPendingSave(this.state, index, DEBOUNCE_DELAY_MS, () => {
       void this.flushPendingSave();
     });
@@ -1250,10 +1489,7 @@ export class AccountsRepository {
   }
 }
 
-function shouldSyncTokensFromAuthFile(
-  current: CodexTokens | undefined,
-  next: CodexTokens
-): boolean {
+function shouldSyncTokensFromAuthFile(current: CodexTokens | undefined, next: CodexTokens): boolean {
   return toComparableTokenSnapshot(current) !== toComparableTokenSnapshot(next);
 }
 
@@ -1307,6 +1543,15 @@ function mergeExternalTokens(
   return merged;
 }
 
+function areTokenCredentialsEqual(left: CodexTokens, right: CodexTokens): boolean {
+  return (
+    left.idToken === right.idToken &&
+    left.accessToken === right.accessToken &&
+    (left.refreshToken ?? "") === (right.refreshToken ?? "") &&
+    (left.accountId ?? "") === (right.accountId ?? "")
+  );
+}
+
 function canAdoptExternalMirrorTokens(
   current: CodexTokens | undefined,
   external: AideckMirrorTokenSnapshot,
@@ -1318,7 +1563,10 @@ function canAdoptExternalMirrorTokens(
   }
 
   if (
-    hasRequiredIdentityMismatch(account?.email ? normalizeEmailIdentity(account.email) : undefined, externalClaims?.email) ||
+    hasRequiredIdentityMismatch(
+      account?.email ? normalizeEmailIdentity(account.email) : undefined,
+      externalClaims?.email
+    ) ||
     hasRequiredIdentityMismatch(account?.userId, externalClaims?.userId) ||
     hasRequiredIdentityMismatch(account?.accountId, external.accountId ?? externalClaims?.accountId) ||
     hasRequiredIdentityMismatch(account?.organizationId, externalClaims?.organizationId)
@@ -1360,12 +1608,14 @@ function buildExpectedMirrorIdentity(
 
 function buildExternalMirrorIdentity(
   external: AideckMirrorTokenSnapshot,
-  claims: {
-    email?: string;
-    userId?: string;
-    accountId?: string;
-    organizationId?: string;
-  } | undefined = safeExtractTokenClaims(external)
+  claims:
+    | {
+        email?: string;
+        userId?: string;
+        accountId?: string;
+        organizationId?: string;
+      }
+    | undefined = safeExtractTokenClaims(external)
 ): {
   email?: string;
   userId?: string;
@@ -1438,7 +1688,11 @@ function isMirrorSnapshotInternallyConsistent(
 }
 
 function hasRequiredIdentityMismatch(expected: string | undefined, candidate: string | undefined): boolean {
-  return Boolean(expected && expected !== candidate);
+  // Some exported/legacy tokens intentionally omit email or organization
+  // claims (and access tokens may be opaque). An absent claim is unknown, not
+  // evidence that the mirror belongs to another account; only a contradiction
+  // should block adoption.
+  return Boolean(expected && candidate && expected !== candidate);
 }
 
 /**

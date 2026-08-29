@@ -1,4 +1,5 @@
-import type { DashboardHostMessage } from "../../src/domain/dashboard/types";
+import type { DashboardHostMessage, DashboardNotice } from "../../src/domain/dashboard/types";
+import { noticeFromActionResult } from "./actionFeedback";
 import type { AppDispatch, SendAction } from "./hookTypes";
 import { useCopyFeedback } from "./copyFeedbackHook";
 import { useAccountSessionModal } from "./accountSessionModalHook";
@@ -8,12 +9,15 @@ export function useDashboardModals(params: {
   dispatch: AppDispatch;
   sendAction: SendAction;
   importJsonFileReadError: string;
+  onNotice: (notice: DashboardNotice) => void;
+  isBrowserDashboard: boolean;
 }) {
   const feedback = useCopyFeedback();
   const accountModal = useAccountSessionModal({
     sendAction: params.sendAction,
     importJsonFileReadError: params.importJsonFileReadError,
-    showCopyFeedback: feedback.showCopyFeedback
+    showCopyFeedback: feedback.showCopyFeedback,
+    openAuthorizationInClient: params.isBrowserDashboard
   });
   const shareModal = useShareModal({
     sendAction: params.sendAction,
@@ -27,10 +31,17 @@ export function useDashboardModals(params: {
         return;
       case "dashboard:action-result":
         params.dispatch({ type: "resolve-action", requestId: message.requestId });
+        const notice = noticeFromActionResult(message);
+        if (notice) {
+          params.onNotice(notice);
+        }
         if (accountModal.applyActionResult(message)) {
           return;
         }
         shareModal.applyActionResult(message);
+        return;
+      case "dashboard:notice":
+        params.onNotice({ level: message.level, message: message.message });
         return;
       default:
         return;

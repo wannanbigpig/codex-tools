@@ -22,6 +22,7 @@ vi.mock("../src/codex", async (importOriginal) => {
 import { AccountsRepository } from "../src/storage";
 import { mirrorAideckCodexAccount } from "../src/storage/aideckCodexStorage";
 import { buildAccountStorageId } from "../src/utils/accountIdentity";
+import { removeTestDirectory } from "./testFilesystem";
 
 function createJwt(payload: Record<string, unknown>): string {
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -99,8 +100,8 @@ describe("AccountsRepository token persistence", () => {
     } else {
       process.env.AIDECK_DATA_DIR = originalAideckDataDir;
     }
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
+    await removeTestDirectory(tempDir);
+  }, 15_000);
 
   it("syncs active auth.json when quota refresh produces updated tokens", async () => {
     const secrets = new Map<string, string>();
@@ -367,6 +368,47 @@ describe("AccountsRepository token persistence", () => {
     repo.dispose();
   });
 
+  it("does not re-import a stale Aideck mirror entry when sync has a deletion tombstone", async () => {
+    const secrets = new Map<string, string>();
+    const context = {
+      globalStorageUri: {
+        fsPath: tempDir
+      },
+      secrets: {
+        get: vi.fn(async (key: string) => secrets.get(key)),
+        store: vi.fn(async (key: string, value: string) => {
+          secrets.set(key, value);
+        }),
+        delete: vi.fn(async (key: string) => {
+          secrets.delete(key);
+        })
+      }
+    } as unknown as vscode.ExtensionContext;
+    const aideckTokens = createTokens("acct_stale", "stale@example.com");
+    const storageId = buildAccountStorageId("stale@example.com", "acct_stale", undefined);
+    await writeAideckAccountJson(storageId, {
+      id: storageId,
+      email: "stale@example.com",
+      account_id: "acct_stale",
+      tokens: {
+        id_token: aideckTokens.idToken,
+        access_token: aideckTokens.accessToken,
+        refresh_token: "stale-refresh-token",
+        account_id: "acct_stale"
+      }
+    });
+
+    const repo = new AccountsRepository(context);
+    repo.setAccountSwitchCoordinator({
+      isAccountDeletionPending: (accountId) => accountId === storageId
+    });
+    await repo.init();
+
+    expect(await repo.getAccount(storageId)).toBeUndefined();
+    expect(secrets.get(`codex.account.${storageId}`)).toBeUndefined();
+    repo.dispose();
+  });
+
   it("does not absorb an Aideck token from a different organization when accountId is shared", async () => {
     const secrets = new Map<string, string>();
     const context = {
@@ -405,7 +447,9 @@ describe("AccountsRepository token persistence", () => {
     );
     await context.secrets.store(
       `codex.account.${storageId}`,
-      JSON.stringify(createTokens("acct_shared", "dev@example.com", { organizationId: "org_team", userId: "user_same" }))
+      JSON.stringify(
+        createTokens("acct_shared", "dev@example.com", { organizationId: "org_team", userId: "user_same" })
+      )
     );
 
     const externalTokens = createTokens("acct_shared", "dev@example.com", {
@@ -629,7 +673,10 @@ describe("AccountsRepository token persistence", () => {
     await expect(fs.readFile(accountFile, "utf8")).rejects.toThrow();
 
     const aideckIndex = JSON.parse(
-      await fs.readFile(path.join(process.env.AIDECK_DATA_DIR as string, "accounts", "codex", "accounts-index.json"), "utf8")
+      await fs.readFile(
+        path.join(process.env.AIDECK_DATA_DIR as string, "accounts", "codex", "accounts-index.json"),
+        "utf8"
+      )
     );
     expect(aideckIndex.accounts).not.toContainEqual(expect.objectContaining({ id: storageId }));
 
@@ -870,8 +917,10 @@ describe("AccountsRepository token persistence", () => {
         updated_at: 123
       },
       tokens: {
-        id_token: createTokens("acct_123", "dev@example.com", { organizationId: "org_team", userId: "user_same" }).idToken,
-        access_token: createTokens("acct_123", "dev@example.com", { organizationId: "org_team", userId: "user_same" }).accessToken,
+        id_token: createTokens("acct_123", "dev@example.com", { organizationId: "org_team", userId: "user_same" })
+          .idToken,
+        access_token: createTokens("acct_123", "dev@example.com", { organizationId: "org_team", userId: "user_same" })
+          .accessToken,
         refresh_token: "old-aideck-refresh",
         account_id: "acct_123"
       }
@@ -1028,6 +1077,133 @@ describe("AccountsRepository token persistence", () => {
     repo.dispose();
   });
 
+  it("imports new and overwrites existing exported accounts when old tokens lack email claims", async () => {
+    const secrets = new Map<string, string>();
+    const context = {
+      globalStorageUri: {
+        fsPath: tempDir
+      },
+      secrets: {
+        get: vi.fn(async (key: string) => secrets.get(key)),
+        store: vi.fn(async (key: string, value: string) => {
+          secrets.set(key, value);
+        }),
+        delete: vi.fn(async (key: string) => {
+          secrets.delete(key);
+        })
+      }
+    } as unknown as vscode.ExtensionContext;
+    const repo = new AccountsRepository(context);
+    const existing = await repo.upsertFromTokens(createTokens("acct_existing", "existing@example.com"));
+    const oldIdToken = createJwt({
+      "https://api.openai.com/auth": {
+        chatgpt_account_id: "acct_existing"
+      }
+    });
+
+    const result = await repo.importSharedAccountsWithSummary({
+      id: existing.id,
+      email: existing.email,
+      account_id: "acct_existing",
+      tokens: {
+        id_token: oldIdToken,
+        access_token: "invalidated-opaque-access-token",
+        refresh_token: "replacement-refresh-token",
+        account_id: "acct_existing"
+      }
+    });
+
+    expect(result).toMatchObject({
+      total: 1,
+      successCount: 1,
+      overwriteCount: 1,
+      failedCount: 0
+    });
+    expect(await repo.listAccounts()).toHaveLength(1);
+    expect((await repo.getTokens(existing.id))?.refreshToken).toBe("replacement-refresh-token");
+
+    const newResult = await repo.importSharedAccountsWithSummary({
+      email: "new-legacy@example.com",
+      account_id: "acct_new_legacy",
+      tokens: {
+        id_token: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "acct_new_legacy"
+          }
+        }),
+        access_token: "another-invalidated-opaque-access-token",
+        refresh_token: "new-refresh-token",
+        account_id: "acct_new_legacy"
+      }
+    });
+
+    expect(newResult).toMatchObject({
+      total: 1,
+      successCount: 1,
+      overwriteCount: 0,
+      failedCount: 0
+    });
+    expect(await repo.listAccounts()).toHaveLength(2);
+
+    repo.dispose();
+  });
+
+  it("clears a stale auth error only when shared import replaces the credentials", async () => {
+    const secrets = new Map<string, string>();
+    const context = {
+      globalStorageUri: {
+        fsPath: tempDir
+      },
+      secrets: {
+        get: vi.fn(async (key: string) => secrets.get(key)),
+        store: vi.fn(async (key: string, value: string) => {
+          secrets.set(key, value);
+        }),
+        delete: vi.fn(async (key: string) => {
+          secrets.delete(key);
+        })
+      }
+    } as unknown as vscode.ExtensionContext;
+    const repo = new AccountsRepository(context);
+    const originalTokens = createTokens("acct_sync", "sync@example.com");
+    const account = await repo.upsertFromTokens(originalTokens);
+    const authError = {
+      code: "unauthorized",
+      message: "API returned 401: token expired",
+      timestamp: 100
+    };
+
+    await repo.updateQuota(account.id, undefined, authError);
+    await repo.importSharedAccountsWithSummary({
+      id: account.id,
+      email: account.email,
+      account_id: account.accountId,
+      tokens: {
+        id_token: originalTokens.idToken,
+        access_token: originalTokens.accessToken,
+        refresh_token: originalTokens.refreshToken,
+        account_id: originalTokens.accountId
+      }
+    });
+    expect((await repo.getAccount(account.id))?.quotaError).toEqual(authError);
+
+    const replacementTokens = { ...originalTokens, refreshToken: "reauthorized-refresh-token" };
+    await repo.importSharedAccountsWithSummary({
+      id: account.id,
+      email: account.email,
+      account_id: account.accountId,
+      tokens: {
+        id_token: replacementTokens.idToken,
+        access_token: replacementTokens.accessToken,
+        refresh_token: replacementTokens.refreshToken,
+        account_id: replacementTokens.accountId
+      }
+    });
+    expect((await repo.getAccount(account.id))?.quotaError).toBeUndefined();
+
+    repo.dispose();
+  });
+
   it("keeps reset credits expiry when snapshot refresh still has available credits but no expiry", async () => {
     const secrets = new Map<string, string>();
     const context = {
@@ -1080,5 +1256,4 @@ describe("AccountsRepository token persistence", () => {
 
     repo.dispose();
   });
-
 });

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildMetrics, sortDashboardAccounts } from "../src/application/dashboard/buildDashboardState";
+import {
+  buildMetrics,
+  resolveDashboardQueuedSwitch,
+  sortDashboardAccounts
+} from "../src/application/dashboard/buildDashboardState";
 import { formatPlanType, getDashboardCopy } from "../src/application/dashboard/copy";
 
 describe("sortDashboardAccounts", () => {
@@ -13,6 +17,26 @@ describe("sortDashboardAccounts", () => {
     const sorted = sortDashboardAccounts(accounts, "current");
 
     expect(sorted.map((account) => account.id)).toEqual(["current", "active", "other"]);
+  });
+});
+
+describe("resolveDashboardQueuedSwitch", () => {
+  it("ignores a queue without a known previous window account", () => {
+    expect(
+      resolveDashboardQueuedSwitch(
+        [{ id: "selected" }],
+        { toAccountId: "selected", queuedAt: 1 }
+      )
+    ).toBeUndefined();
+  });
+
+  it("keeps a queue only when both the previous and selected accounts exist", () => {
+    const queuedSwitch = { fromAccountId: "previous", toAccountId: "selected", queuedAt: 1 };
+
+    expect(resolveDashboardQueuedSwitch([{ id: "previous" }, { id: "selected" }], queuedSwitch)).toBe(
+      queuedSwitch
+    );
+    expect(resolveDashboardQueuedSwitch([{ id: "selected" }], queuedSwitch)).toBeUndefined();
   });
 });
 

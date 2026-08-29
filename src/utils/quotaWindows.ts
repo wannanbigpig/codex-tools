@@ -122,7 +122,7 @@ function readCreditsFromRawData(rawData: unknown): CodexCreditsSummary | undefin
     hasCredits: credits["has_credits"] === true || credits["hasCredits"] === true,
     unlimited: credits["unlimited"] === true,
     overageLimitReached: credits["overage_limit_reached"] === true || credits["overageLimitReached"] === true,
-    balance: String(credits["balance"] ?? "").trim(),
+    balance: toPrimitiveString(credits["balance"]),
     approxLocalMessages: Array.isArray(credits["approx_local_messages"])
       ? credits["approx_local_messages"]
       : Array.isArray(credits["approxLocalMessages"])
@@ -134,6 +134,12 @@ function readCreditsFromRawData(rawData: unknown): CodexCreditsSummary | undefin
         ? credits["approxCloudMessages"]
         : []
   };
+}
+
+function toPrimitiveString(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+    ? String(value).trim()
+    : "";
 }
 
 function createQuotaWindowSnapshot(

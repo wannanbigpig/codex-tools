@@ -40,9 +40,8 @@ export const TOKEN_ENDPOINT = "https://auth.openai.com/oauth/token";
 /** OAuth 客户端 ID */
 export const OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 
-/** OAuth 作用域（对齐 cockpit-tools，包含 connectors 权限） */
-export const OAUTH_SCOPES =
-  "openid profile email offline_access api.connectors.read api.connectors.invoke";
+/** OAuth scope set used by the Codex VS Code sign-in flow. */
+export const OAUTH_SCOPES = "openid profile email offline_access api.connectors.read api.connectors.invoke";
 
 /** OAuth 发起源 */
 export const OAUTH_ORIGINATOR = "codex_vscode";

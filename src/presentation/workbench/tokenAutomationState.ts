@@ -17,7 +17,7 @@ export type TokenAutomationSnapshot = {
 };
 
 const state: TokenAutomationSnapshot = {
-  enabled: true,
+  enabled: false,
   intervalMs: 0,
   skewSeconds: 0,
   accounts: {}

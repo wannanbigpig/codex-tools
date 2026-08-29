@@ -1,6 +1,7 @@
 import type { DashboardLanguage, DashboardLanguageOption } from "../../localization/languages";
 import type {
   CodexAnnouncementState,
+  CodexDailyUsageBreakdown,
   CodexImportPreviewSummary,
   CodexImportResultSummary,
   CodexIndexHealthSummary
@@ -11,7 +12,11 @@ export type DashboardSettingKey =
   | "codexAppRestartEnabled"
   | "codexAppRestartMode"
   | "backgroundTokenRefreshEnabled"
+  | "cliIntegrationEnabled"
+  | "autoResumeCodexSessions"
   | "autoRefreshMinutes"
+  | "autoRefreshCurrentMinutes"
+  | "usageHistoryRetentionDays"
   | "autoSwitchEnabled"
   | "hourlyQuotaControlEnabled"
   | "autoSwitchReloadWindowEnabled"
@@ -23,6 +28,8 @@ export type DashboardSettingKey =
   | "quotaGreenThreshold"
   | "quotaYellowThreshold"
   | "debugNetwork"
+  | "encryptedSyncEnabled"
+  | "webDashboardEnabled"
   | "displayLanguage";
 
 export interface DashboardSettings {
@@ -30,7 +37,12 @@ export interface DashboardSettings {
   codexAppRestartEnabled: boolean;
   codexAppRestartMode: "auto" | "manual";
   backgroundTokenRefreshEnabled: boolean;
+  /** Master gate for local Codex CLI session access and auto-resume. */
+  cliIntegrationEnabled?: boolean;
+  autoResumeCodexSessions: boolean;
   autoRefreshMinutes: number;
+  autoRefreshCurrentMinutes: number;
+  usageHistoryRetentionDays: number;
   autoSwitchEnabled: boolean;
   hourlyQuotaControlEnabled: boolean;
   autoSwitchReloadWindowEnabled: boolean;
@@ -44,6 +56,9 @@ export interface DashboardSettings {
   quotaGreenThreshold: number;
   quotaYellowThreshold: number;
   debugNetwork: boolean;
+  encryptedSyncEnabled: boolean;
+  encryptedSyncRegistryOverrideEnabled: boolean;
+  webDashboardEnabled: boolean;
   displayLanguage: DashboardLanguageOption;
 }
 
@@ -212,6 +227,9 @@ export interface DashboardCopy {
   restartModeNote: string;
   autoRefreshTitle: string;
   autoRefreshSub: string;
+  autoRefreshCurrentTitle: string;
+  autoRefreshCurrentSub: string;
+  autoRefreshCurrentValueDescTemplate: string;
   autoRefreshOn: string;
   autoRefreshOnDesc: string;
   autoRefreshOff: string;
@@ -239,6 +257,7 @@ export interface DashboardCopy {
   autoSwitchLockValueTemplate: string;
   autoSwitchLockValueDescTemplate: string;
   autoSwitchToastSwitched: string;
+  autoSwitchToastSwitchedAndReloaded: string;
   appPathTitle: string;
   appPathSub: string;
   appPathEmpty: string;
@@ -284,6 +303,9 @@ export interface DashboardCopy {
   statusToggleTip: string;
   statusToggleTipChecked: string;
   statusLimitTip: string;
+  accountEnableTip: string;
+  accountDisableTip: string;
+  accountDisabledTag: string;
   unknown: string;
   never: string;
   resetUnknown: string;
@@ -294,11 +316,26 @@ type DashboardMetricKey = string;
 export interface DashboardMetricViewModel {
   key: DashboardMetricKey;
   label: string;
+  period?: "hourly" | "weekly" | "monthly";
   percentage?: number;
   resetAt?: number;
   requestsLeft?: number;
   requestsLimit?: number;
   visible: boolean;
+}
+
+export interface DashboardUsageSample {
+  at: number;
+  accountId: string;
+  hourly?: number;
+  weekly?: number;
+  review?: number;
+}
+
+export interface DashboardDailyUsageCacheEntry {
+  accountId: string;
+  fetchedAt: number;
+  usage: CodexDailyUsageBreakdown;
 }
 
 export interface DashboardAccountViewModel {
@@ -315,16 +352,30 @@ export interface DashboardAccountViewModel {
   subscriptionText: string;
   subscriptionTitle: string;
   subscriptionColor?: string;
+  subscriptionExpiresAt?: number;
   addMethodLabel: string;
   addedAtLabel: string;
+  loginAt?: number;
+  sessionStartedAt?: number;
+  totalUsageMs?: number;
+  runningDeviceName?: string;
+  runningOnThisDevice?: boolean;
+  enablementSyncPending?: boolean;
   statusColor?: string;
   planTypeLabel: string;
   creditsText?: string;
+  creditsBalance?: number;
+  creditsUnlimited?: boolean;
   userId?: string;
   accountId?: string;
   organizationId?: string;
   isActive: boolean;
+  switchQueued: boolean;
   isCurrentWindowAccount: boolean;
+  enabled: boolean;
+  queuePriority: boolean;
+  tokenRefreshEnabled: boolean;
+  canRefreshToken: boolean;
   showInStatusBar: boolean;
   canToggleStatusBar: boolean;
   statusToggleTitle: string;
@@ -381,11 +432,21 @@ export interface DashboardState {
   brandSub: string;
   logoUri: string;
   settings: DashboardSettings;
+  encryptedSyncNeedsConfiguration?: boolean;
+  encryptedSyncNeedsSettingsSync?: boolean;
+  encryptedSyncLastCompletedAt?: number;
+  encryptedSyncSessionCount?: number;
+  encryptedSyncEnabledSessionCount?: number;
   copy: DashboardCopy;
   tokenAutomation: DashboardTokenAutomationViewModel;
   announcements: CodexAnnouncementState;
   indexHealth: CodexIndexHealthSummary;
   accounts: DashboardAccountViewModel[];
+  /** Recent terminal result shown by the dashboard's top toast. */
+  terminalNotice?: DashboardNotice & { createdAt: number };
+  /** Shared by the VS Code panel and browser dashboard; omitted by older hosts. */
+  usageHistory?: DashboardUsageSample[];
+  dailyUsageCache?: DashboardDailyUsageCacheEntry[];
 }
 
 export type DashboardActionName =
@@ -396,9 +457,18 @@ export type DashboardActionName =
   | "markAnnouncementRead"
   | "markAllAnnouncementsRead"
   | "shareTokens"
+  | "exportBackup"
+  | "configureEncryptedSync"
+  | "syncNow"
+  | "setEncryptedSyncRegistryOverride"
+  | "openNetworkLogs"
+  | "exportAuthFile"
   | "restoreFromBackup"
   | "restoreFromAuthJson"
   | "copyText"
+  | "openDashboard"
+  | "openWebDashboard"
+  | "setWebDashboardPassword"
   | "openExternalUrl"
   | "downloadJsonFile"
   | "previewImportSharedJson"
@@ -421,7 +491,21 @@ export type DashboardActionName =
   | "switch"
   | "refresh"
   | "remove"
-  | "toggleStatusBar"
+  | "toggleAccountEnabled"
+  | "setAccountQueuePriority"
+  | "setAccountTokenRefreshEnabled"
+  | "refreshToken"
+  | "getDailyUsage"
+  | "listCodexCliSessions"
+  | "getCodexCliSessionMessages"
+  | "sendCodexCliSessionMessage"
+  | "cancelCodexCliSessionTurn"
+  | "openCodexCliSession"
+  | "renameCodexCliSession"
+  | "forkCodexCliSession"
+  | "archiveCodexCliSession"
+  | "unarchiveCodexCliSession"
+  | "deleteCodexCliSession"
   | "getResetCredits"
   | "consumeResetCredit";
 
@@ -436,6 +520,7 @@ export interface DashboardActionPayload {
   jsonText?: string;
   text?: string;
   url?: string;
+  path?: string;
   filename?: string;
   oauthSessionId?: string;
   callbackUrl?: string;
@@ -446,10 +531,88 @@ export interface DashboardActionPayload {
   lockMinutes?: number;
   announcementId?: string;
   privacyMode?: boolean;
+  queuePriority?: boolean;
+  tokenRefreshEnabled?: boolean;
+  enabled?: boolean;
+  days?: number;
+  sessionId?: string;
+  model?: string;
+  reasoningEffort?: string;
+  sandboxMode?: DashboardCliSandboxMode;
+  password?: string;
+  /** Browser-dashboard confirmation supplied by an in-page modal. */
+  confirmed?: boolean;
+  /** Tags collected by the browser dashboard instead of a VS Code input box. */
+  submittedTags?: string[];
+  /** Secret collected by a port-dashboard password modal. Never persisted in dashboard state. */
+  passphrase?: string;
+  passphraseConfirmation?: string;
+}
+
+export interface DashboardCliSessionSummary {
+  id: string;
+  title: string;
+  updatedAt?: string;
+  status: "running" | "idle";
+  archived?: boolean;
+}
+
+export interface DashboardCliSessionMessage {
+  id: string;
+  kind?:
+    | "message"
+    | "reasoning"
+    | "plan"
+    | "command"
+    | "file-change"
+    | "tool-call"
+    | "collaboration"
+    | "web-search"
+    | "image"
+    | "review"
+    | "compaction"
+    | "error";
+  role?: "user" | "assistant";
+  text: string;
+  title?: string;
+  subtitle?: string;
+  status?: "inProgress" | "completed" | "failed" | "declined" | "interrupted" | "unknown";
+  command?: string;
+  cwd?: string;
+  output?: string;
+  exitCode?: number;
+  durationMs?: number;
+  arguments?: string;
+  result?: string;
+  changes?: Array<{
+    path: string;
+    kind: string;
+    diff?: string;
+  }>;
+  timestamp?: string;
+}
+
+export type DashboardCliSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+
+export interface DashboardCliModelOption {
+  id: string;
+  label: string;
+  description?: string;
+  defaultReasoningEffort?: string;
+  reasoningEfforts: string[];
+}
+
+export interface DashboardCliComposerConfig {
+  models: DashboardCliModelOption[];
+  defaultModel?: string;
+  defaultReasoningEffort?: string;
+  defaultSandboxMode: DashboardCliSandboxMode;
 }
 
 export interface DashboardActionResultPayload {
+  notice?: DashboardNotice;
   sharedJson?: string;
+  authJson?: string;
   oauthSession?: DashboardOAuthSessionDescriptor;
   importPreview?: CodexImportPreviewSummary;
   importResult?: CodexImportResultSummary;
@@ -459,6 +622,20 @@ export interface DashboardActionResultPayload {
   email?: string;
   restoredCount?: number;
   resetCredits?: import("../../core/types").CodexResetCreditsSnapshot;
+  dailyUsage?: CodexDailyUsageBreakdown;
+  cliSessions?: DashboardCliSessionSummary[];
+  cliSession?: DashboardCliSessionSummary;
+  cliSessionMessages?: DashboardCliSessionMessage[];
+  cliComposerConfig?: DashboardCliComposerConfig;
+  /** The active credentials changed and this VS Code window should be reloaded. */
+  reloadRequired?: boolean;
+  /** Account that should be used when presenting an in-dashboard reload confirmation. */
+  reloadAccountId?: string;
+}
+
+export interface DashboardNotice {
+  level: "info" | "warning" | "error";
+  message: string;
 }
 
 export type DashboardHostMessage =
@@ -471,13 +648,15 @@ export type DashboardHostMessage =
       requestId: string;
       action: DashboardActionName;
       accountId?: string;
-      status: "completed" | "failed";
+      status: "completed" | "cancelled" | "failed";
       payload?: DashboardActionResultPayload;
       error?: string;
-    };
+    }
+  | ({ type: "dashboard:notice" } & DashboardNotice);
 
 export type DashboardClientMessage =
   | { type: "dashboard:ready" }
+  | { type: "dashboard:usage-history"; samples: DashboardUsageSample[] }
   | {
       type: "dashboard:action";
       requestId: string;

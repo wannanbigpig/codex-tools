@@ -1,4 +1,10 @@
-import type { DashboardCopy, DashboardOAuthSessionDescriptor, DashboardState } from "../../src/domain/dashboard/types";
+import type {
+  DashboardAccountViewModel,
+  DashboardCopy,
+  DashboardOAuthSessionDescriptor,
+  DashboardState
+} from "../../src/domain/dashboard/types";
+import { useState } from "preact/hooks";
 import type { CodexImportPreviewSummary, CodexImportResultSummary } from "../../src/core/types";
 import { ImportPreviewPanel, ImportResultPanel, ModalShell } from "./components";
 import { createShareFileName, formatTemplate, maskSharedJson } from "./helpers";
@@ -26,6 +32,138 @@ const IMPORT_BATCH_EXAMPLE = `[
   }
 ]`;
 
+function resolveAccountModalTabLabel(tab: "add" | "import", lang: DashboardState["lang"]): string {
+  if (lang === "zh") return tab === "add" ? "添加" : "导入";
+  if (lang === "zh-hant") return tab === "add" ? "新增" : "匯入";
+  return tab === "add" ? "Add" : "Import";
+}
+
+export function resolveCreateOAuthLinkLabel(lang: DashboardState["lang"]): string {
+  if (lang === "zh") return "创建链接";
+  if (lang === "zh-hant") return "建立連結";
+  return "Create Link";
+}
+
+function resolveAccountInfoCopy(lang: DashboardState["lang"]): {
+  title: string;
+  workspace: string;
+  subscription: string;
+  addedBy: string;
+  created: string;
+  status: string;
+  userId: string;
+  accountId: string;
+  organizationId: string;
+  tags: string;
+  noTags: string;
+} {
+  if (lang === "zh") {
+    return {
+      title: "账号信息",
+      workspace: "工作区",
+      subscription: "订阅",
+      addedBy: "添加方式",
+      created: "创建时间",
+      status: "状态",
+      userId: "用户 ID",
+      accountId: "账号 ID",
+      organizationId: "组织 ID",
+      tags: "标签",
+      noTags: "无标签"
+    };
+  }
+  if (lang === "zh-hant") {
+    return {
+      title: "帳號資訊",
+      workspace: "工作區",
+      subscription: "訂閱",
+      addedBy: "新增方式",
+      created: "建立時間",
+      status: "狀態",
+      userId: "使用者 ID",
+      accountId: "帳號 ID",
+      organizationId: "組織 ID",
+      tags: "標籤",
+      noTags: "無標籤"
+    };
+  }
+  return {
+    title: "Account info",
+    workspace: "Workspace",
+    subscription: "Subscription",
+    addedBy: "Added by",
+    created: "Created",
+    status: "Status",
+    userId: "User ID",
+    accountId: "Account ID",
+    organizationId: "Organization ID",
+    tags: "Tags",
+    noTags: "No tags"
+  };
+}
+
+export function AccountInfoModal(props: {
+  account?: DashboardAccountViewModel;
+  lang: DashboardState["lang"];
+  closeLabel: string;
+  onClose: () => void;
+}) {
+  const account = props.account;
+  const copy = resolveAccountInfoCopy(props.lang);
+  return (
+    <ModalShell
+      open={Boolean(account)}
+      title={account ? `${copy.title}: ${account.email}` : copy.title}
+      closeLabel={props.closeLabel}
+      className="dashboard-modal-compact account-info-modal"
+      onClose={props.onClose}
+    >
+      {account ? (
+        <div class="account-info-grid">
+          <InfoRow label={copy.workspace} value={account.workspaceLabel} />
+          <InfoRow label={copy.subscription} value={account.subscriptionText} title={account.subscriptionTitle} />
+          <InfoRow label={copy.addedBy} value={account.addMethodLabel} />
+          <InfoRow label={copy.created} value={account.addedAtLabel} />
+          <InfoRow label={copy.status} value={account.healthLabel} />
+          <InfoRow label={copy.userId} value={account.userId ?? "—"} mono />
+          <InfoRow label={copy.accountId} value={account.accountId ?? "—"} mono />
+          <InfoRow label={copy.organizationId} value={account.organizationId ?? "—"} mono />
+          <InfoRow label={copy.tags} value={account.tags.length ? account.tags.join(", ") : copy.noTags} />
+        </div>
+      ) : null}
+    </ModalShell>
+  );
+}
+
+export function WebDashboardPasswordModal(props: {
+  open: boolean;
+  closeLabel: string;
+  onClose: () => void;
+  onSubmit: (password: string) => void;
+}) {
+  const [password, setPassword] = useState("");
+  return (
+    <ModalShell open={props.open} title="Set Web Dashboard password" closeLabel={props.closeLabel} className="dashboard-modal-compact" onClose={props.onClose}>
+      <form onSubmit={(event) => { event.preventDefault(); props.onSubmit(password); setPassword(""); }}>
+        <label class="settings-block-sub" for="web-dashboard-password">Use at least 8 characters. Leave empty to remove the password.</label>
+        <input id="web-dashboard-password" class="settings-text-input" type="password" value={password} onInput={(event) => setPassword(event.currentTarget.value)} autoFocus />
+        <div class="saved-actions"><button type="button" onClick={props.onClose}>Cancel</button><button type="submit">Save password</button></div>
+      </form>
+    </ModalShell>
+  );
+}
+
+function InfoRow(props: { label: string; value: string; title?: string; mono?: boolean }) {
+  return (
+    <div class="account-info-row">
+      <span class="account-info-label">{props.label}</span>
+      <span class={`account-info-value ${props.mono ? "is-mono" : ""}`} title={props.title}>
+        {props.value}
+      </span>
+    </div>
+  );
+}
+
 export function AddAccountModal(props: {
   open: boolean;
   tab: "oauth" | "import";
@@ -39,93 +177,125 @@ export function AddAccountModal(props: {
   importResult?: CodexImportResultSummary;
   copyFeedbackKey: string | null;
   lang: DashboardState["lang"];
+  prepareOAuthPending: boolean;
   startOAuthAutoPending: boolean;
   completeOAuthPending: boolean;
+  importCurrentPending: boolean;
   previewImportPending: boolean;
   importSharedPending: boolean;
   onClose: () => void;
   onSelectTab: (tab: "oauth" | "import") => void;
+  onCreateOauthLink: () => void;
   onCopyOauthLink: () => void;
   onOpenInBrowser: () => void;
   onOauthCallbackChange: (value: string) => void;
   onCompleteOAuth: () => void;
+  onImportCurrent: () => void;
   onImportFileSelected: (file: File) => void;
   onImportTextChange: (value: string) => void;
   onPreviewImport: () => void;
   onSubmitImport: () => void;
 }) {
+  const oauthLinkReady = Boolean(props.oauthSession?.authUrl);
+
   return (
     <ModalShell
       open={props.open}
       title={props.copy.addAccountModalTitle}
       closeLabel={props.copy.closeModal}
-      className="dashboard-modal-compact"
+      className="dashboard-modal-compact account-add-popover"
+      closeOnBackdrop={false}
       onClose={props.onClose}
     >
       <div class="modal-tabs" role="tablist" aria-label={props.copy.addAccountModalTitle}>
         <button
           class={`modal-tab ${props.tab === "oauth" ? "active" : ""}`}
           type="button"
+          role="tab"
+          aria-selected={props.tab === "oauth"}
           onClick={() => props.onSelectTab("oauth")}
         >
           <span class="modal-tab-icon" aria-hidden="true">
             <GlobeIcon />
           </span>
-          {props.copy.oauthTab}
+          {resolveAccountModalTabLabel("add", props.lang)}
         </button>
         <button
           class={`modal-tab ${props.tab === "import" ? "active" : ""}`}
           type="button"
+          role="tab"
+          aria-selected={props.tab === "import"}
           onClick={() => props.onSelectTab("import")}
         >
           <span class="modal-tab-icon" aria-hidden="true">
             <ImportIcon />
           </span>
-          {props.copy.importJsonTab}
+          {resolveAccountModalTabLabel("import", props.lang)}
         </button>
       </div>
       {props.tab === "oauth" ? (
-        <div class="modal-stack">
-          <div class="modal-field">
-            <div class="modal-label">{props.copy.authorizationLink}</div>
-            <div class="modal-input-row">
+        <div class="modal-stack oauth-modal-stack">
+          <div class="oauth-launch-panel">
+            <div class="oauth-launch-actions">
               <input
-                class="modal-input"
+                class="modal-input oauth-link-input"
                 type="text"
                 readOnly
                 value={props.oauthSession?.authUrl ?? ""}
                 placeholder={props.copy.authorizationLink}
+                aria-label={props.copy.authorizationLink}
               />
-              <button
-                class={`modal-mini-btn modal-icon-btn ${props.copyFeedbackKey === "oauth-link" ? "is-success" : ""}`}
-                type="button"
-                disabled={!props.oauthSession?.authUrl}
-                aria-label={props.copyFeedbackKey === "oauth-link" ? props.copy.copySuccess : props.copy.copyLink}
-                onClick={props.onCopyOauthLink}
-              >
-                {props.copyFeedbackKey === "oauth-link" ? <SuccessIcon /> : <CopyIcon />}
-              </button>
+              {oauthLinkReady ? (
+                <>
+                  <button
+                    class={`modal-mini-btn modal-icon-btn oauth-copy-btn ${props.copyFeedbackKey === "oauth-link" ? "is-success" : ""}`}
+                    type="button"
+                    aria-label={props.copyFeedbackKey === "oauth-link" ? props.copy.copySuccess : props.copy.copyLink}
+                    title={props.copyFeedbackKey === "oauth-link" ? props.copy.copySuccess : props.copy.copyLink}
+                    onClick={props.onCopyOauthLink}
+                  >
+                    <span class="modal-btn-icon" aria-hidden="true">
+                      {props.copyFeedbackKey === "oauth-link" ? <SuccessIcon /> : <CopyIcon />}
+                    </span>
+                  </button>
+                  <button
+                    class="modal-primary-btn oauth-open-btn"
+                    type="button"
+                    disabled={props.startOAuthAutoPending}
+                    onClick={props.onOpenInBrowser}
+                  >
+                    <span class="modal-btn-icon" aria-hidden="true">
+                      <GlobeIcon />
+                    </span>
+                    {props.startOAuthAutoPending ? "..." : props.copy.openInBrowser}
+                  </button>
+                </>
+              ) : (
+                <button
+                  class="modal-primary-btn oauth-create-link-btn"
+                  type="button"
+                  disabled={props.prepareOAuthPending}
+                  aria-busy={props.prepareOAuthPending}
+                  onClick={props.onCreateOauthLink}
+                >
+                  <span class="modal-btn-icon" aria-hidden="true">
+                    <GlobeIcon />
+                  </span>
+                  {props.prepareOAuthPending ? "..." : resolveCreateOAuthLinkLabel(props.lang)}
+                </button>
+              )}
             </div>
           </div>
-          <button
-            class="modal-primary-btn"
-            type="button"
-            disabled={!props.oauthSession?.authUrl || props.startOAuthAutoPending}
-            onClick={props.onOpenInBrowser}
-          >
-            <span class="modal-btn-icon" aria-hidden="true">
-              <GlobeIcon />
-            </span>
-            {props.startOAuthAutoPending ? "..." : props.copy.openInBrowser}
-          </button>
-          <div class="modal-field">
+          <div class="modal-field oauth-callback-field">
             <div class="modal-label">{props.copy.manualCallbackLabel}</div>
-            <div class="modal-input-row">
-              <input
-                class="modal-input"
-                type="text"
+            <div class="modal-input-row oauth-callback-row">
+              <textarea
+                class="modal-input oauth-callback-input"
                 value={props.oauthCallbackUrl}
-                placeholder={props.copy.manualCallbackPlaceholder}
+                placeholder={props.copy.manualCallbackLabel}
+                aria-label={props.copy.manualCallbackLabel}
+                spellcheck={false}
+                rows={2}
                 onInput={(event) => props.onOauthCallbackChange(event.currentTarget.value)}
               />
               <button
@@ -138,16 +308,26 @@ export function AddAccountModal(props: {
               </button>
             </div>
           </div>
-          <div class="modal-note">{props.copy.oauthReadyHint}</div>
           {props.oauthError ? <div class="modal-error">{props.oauthError}</div> : null}
         </div>
       ) : (
         <div class="modal-stack">
-          <div class="modal-note">{props.copy.importJsonHint}</div>
+          <div class="modal-import-current">
+            <button
+              class="modal-secondary-btn modal-import-current-btn"
+              type="button"
+              disabled={props.importCurrentPending}
+              onClick={props.onImportCurrent}
+            >
+              <span class="modal-btn-icon" aria-hidden="true">
+                <ImportIcon />
+              </span>
+              {props.importCurrentPending ? "..." : props.copy.importCurrent}
+            </button>
+          </div>
           <details class="modal-disclosure">
             <summary>{props.copy.importJsonExamplesSummary}</summary>
             <div class="modal-disclosure-body">
-              <div class="modal-note">{props.copy.importJsonExamplesHint}</div>
               <div class="modal-example-block">
                 <div class="modal-example-label">{props.copy.importJsonSingleExampleLabel}</div>
                 <pre class="modal-example-code">{IMPORT_SINGLE_EXAMPLE}</pre>
@@ -250,6 +430,7 @@ export function ShareTokenModal(props: {
   copy: DashboardCopy;
   selectedCount: number;
   shareModalJson: string;
+  shareModalFilename?: string;
   sharePreviewExpanded: boolean;
   copyFeedbackKey: string | null;
   downloadSharePending: boolean;
@@ -294,7 +475,7 @@ export function ShareTokenModal(props: {
             class="modal-toolbar-btn"
             type="button"
             disabled={props.downloadSharePending}
-            onClick={() => props.onDownloadJson(createShareFileName(), props.shareModalJson)}
+            onClick={() => props.onDownloadJson(props.shareModalFilename ?? createShareFileName(), props.shareModalJson)}
           >
             <span class="modal-btn-icon" aria-hidden="true">
               <DownloadIcon />

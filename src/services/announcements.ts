@@ -23,7 +23,8 @@ export class AnnouncementService {
   constructor(
     private readonly storageDir: string,
     private readonly extensionRoot: string,
-    private readonly announcementUrl = process.env["CODEX_ACCOUNTS_ANNOUNCEMENT_URL"]?.trim() ?? DEFAULT_ANNOUNCEMENT_URL
+    private readonly announcementUrl = process.env["CODEX_ACCOUNTS_ANNOUNCEMENT_URL"]?.trim() ??
+      DEFAULT_ANNOUNCEMENT_URL
   ) {}
 
   async getState(options: AnnouncementOptions = {}): Promise<CodexAnnouncementState> {
@@ -56,7 +57,10 @@ export class AnnouncementService {
     await this.saveReadIds(announcements.map((item) => item.id));
   }
 
-  private async buildState(announcements: CodexAnnouncement[], options: AnnouncementOptions): Promise<CodexAnnouncementState> {
+  private async buildState(
+    announcements: CodexAnnouncement[],
+    options: AnnouncementOptions
+  ): Promise<CodexAnnouncementState> {
     const filtered = filterAnnouncements(announcements, options);
     const readIds = await this.getReadIds();
     const unreadIds = filtered.filter((item) => !readIds.includes(item.id)).map((item) => item.id);
@@ -156,7 +160,7 @@ export class AnnouncementService {
     if (!Array.isArray(raw)) {
       return [];
     }
-    return raw.map((value) => String(value || "").trim()).filter(Boolean);
+    return raw.map(toSafeString).filter(Boolean);
   }
 
   private async saveReadIds(ids: string[]): Promise<void> {
@@ -166,11 +170,18 @@ export class AnnouncementService {
   }
 }
 
-export function normalizeAnnouncementResponse(payload: unknown): { version: string; announcements: CodexAnnouncement[] } {
+export function normalizeAnnouncementResponse(payload: unknown): {
+  version: string;
+  announcements: CodexAnnouncement[];
+} {
   const raw = isRecord(payload) ? payload : {};
-  const source = Array.isArray(raw["announcements"]) ? raw["announcements"] : Array.isArray(raw["data"]) ? raw["data"] : [];
+  const source = Array.isArray(raw["announcements"])
+    ? raw["announcements"]
+    : Array.isArray(raw["data"])
+      ? raw["data"]
+      : [];
   return {
-    version: String(raw["version"] || "1.0"),
+    version: toSafeString(raw["version"]) || "1.0",
     announcements: source.map(normalizeAnnouncement).filter((item): item is CodexAnnouncement => Boolean(item))
   };
 }
@@ -227,37 +238,46 @@ export function isDevelopmentRuntime(extensionRoot: string): boolean {
   if (process.env["NODE_ENV"]?.trim().toLowerCase() === "development") {
     return true;
   }
-  return fsSync.existsSync(path.join(extensionRoot, "src")) && fsSync.existsSync(path.join(extensionRoot, "webview-src"));
+  return (
+    fsSync.existsSync(path.join(extensionRoot, "src")) && fsSync.existsSync(path.join(extensionRoot, "webview-src"))
+  );
 }
 
 function normalizeAnnouncement(item: unknown): CodexAnnouncement | null {
   if (!isRecord(item)) {
     return null;
   }
-  const id = String(item["id"] || "").trim();
+  const id = toSafeString(item["id"]);
   if (!id) {
     return null;
   }
 
   return {
     id,
-    type: String(item["type"] || item["announcementType"] || "info").trim() || "info",
+    type: toSafeString(item["type"] ?? item["announcementType"]) || "info",
     priority: Number.isFinite(Number(item["priority"])) ? Number(item["priority"]) : 0,
     releaseVersion: normalizeVersionString(
-      item["releaseVersion"] ?? item["release_version"] ?? item["updateVersion"] ?? item["update_version"] ?? item["version"]
+      item["releaseVersion"] ??
+        item["release_version"] ??
+        item["updateVersion"] ??
+        item["update_version"] ??
+        item["version"]
     ),
-    title: String(item["title"] || "").trim(),
-    summary: String(item["summary"] || "").trim(),
-    content: String(item["content"] || "").trim(),
+    title: toSafeString(item["title"]),
+    summary: toSafeString(item["summary"]),
+    content: toSafeString(item["content"]),
     restartHint: normalizeOptionalString(item["restartHint"] ?? item["restart_hint"]),
     action: normalizeAction(item["action"]),
-    targetVersions: String(item["targetVersions"] || item["target_versions"] || "*").trim() || "*",
+    targetVersions: toSafeString(item["targetVersions"] ?? item["target_versions"]) || "*",
     targetLanguages: normalizeStringList(item["targetLanguages"] ?? item["target_languages"], ["*"]),
     showOnce: item["showOnce"] !== false && item["show_once"] !== false,
     popup: item["popup"] === true,
     pinned: item["pinned"] === true || item["top"] === true,
-    createdAt: String(item["createdAt"] || item["created_at"] || "").trim(),
-    expiresAt: item["expiresAt"] == null && item["expires_at"] == null ? null : String(item["expiresAt"] ?? item["expires_at"]),
+    createdAt: toSafeString(item["createdAt"] ?? item["created_at"]),
+    expiresAt:
+      item["expiresAt"] == null && item["expires_at"] == null
+        ? null
+        : toSafeString(item["expiresAt"] ?? item["expires_at"]),
     locales: isRecord(item["locales"]) ? item["locales"] : null,
     images: Array.isArray(item["images"])
       ? item["images"].map(normalizeImage).filter((image): image is CodexAnnouncementImage => Boolean(image))
@@ -269,15 +289,30 @@ function normalizeAction(action: unknown): CodexAnnouncementAction | undefined {
   if (!isRecord(action)) {
     return undefined;
   }
-  const type = String(action["type"] || "").trim();
-  const target = String(action["target"] || "").trim();
+  const type = toSafeString(action["type"]);
+  const target = toSafeString(action["target"]);
   if (!type || !target) {
+    return undefined;
+  }
+  if (type === "url") {
+    try {
+      const parsed = new URL(target);
+      if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+        return undefined;
+      }
+    } catch {
+      return undefined;
+    }
+  } else if (type === "command" && target !== "announcement.forceRefresh") {
+    // Remote announcements must not invoke arbitrary VS Code commands.
+    return undefined;
+  } else if (type !== "command") {
     return undefined;
   }
   return {
     type,
     target,
-    label: String(action["label"] || "").trim() || "打开",
+    label: toSafeString(action["label"]) || "打开",
     arguments: Array.isArray(action["arguments"]) ? action["arguments"] : []
   };
 }
@@ -286,14 +321,14 @@ function normalizeImage(image: unknown): CodexAnnouncementImage | undefined {
   if (!isRecord(image)) {
     return undefined;
   }
-  const url = String(image["url"] || "").trim();
+  const url = toSafeString(image["url"]);
   if (!url) {
     return undefined;
   }
   return {
     url,
-    label: String(image["label"] || "").trim() || undefined,
-    alt: String(image["alt"] || "").trim() || undefined
+    label: toSafeString(image["label"]) || undefined,
+    alt: toSafeString(image["alt"]) || undefined
   };
 }
 
@@ -313,20 +348,25 @@ function applyLocale(announcement: CodexAnnouncement, locale: string): CodexAnno
   }
 
   const next = { ...announcement };
-  if (localized["title"]) {
-    next.title = String(localized["title"]);
+  const title = toSafeString(localized["title"]);
+  const summary = toSafeString(localized["summary"]);
+  const content = toSafeString(localized["content"]);
+  const restartHint = toSafeString(localized["restartHint"]);
+  const actionLabel = toSafeString(localized["actionLabel"]);
+  if (title) {
+    next.title = title;
   }
-  if (localized["summary"]) {
-    next.summary = String(localized["summary"]);
+  if (summary) {
+    next.summary = summary;
   }
-  if (localized["content"]) {
-    next.content = String(localized["content"]);
+  if (content) {
+    next.content = content;
   }
-  if (localized["restartHint"]) {
-    next.restartHint = String(localized["restartHint"]);
+  if (restartHint) {
+    next.restartHint = restartHint;
   }
-  if (localized["actionLabel"] && next.action) {
-    next.action = { ...next.action, label: String(localized["actionLabel"]) };
+  if (actionLabel && next.action) {
+    next.action = { ...next.action, label: actionLabel };
   }
   return next;
 }
@@ -348,7 +388,7 @@ function applyVersionState(announcement: CodexAnnouncement, currentVersion: stri
     currentVersion,
     restartRequired,
     restartHint: restartRequired
-      ? announcement.restartHint ?? formatRestartHint(currentVersion, releaseVersion, locale)
+      ? (announcement.restartHint ?? formatRestartHint(currentVersion, releaseVersion, locale))
       : announcement.restartHint
   };
 }
@@ -432,8 +472,14 @@ function matchVersionRule(currentVersion: string, rule: string): boolean {
 }
 
 function compareVersions(left: string, right: string): number {
-  const a = left.replace(/^v/i, "").split(".").map((part) => Number(part) || 0);
-  const b = right.replace(/^v/i, "").split(".").map((part) => Number(part) || 0);
+  const a = left
+    .replace(/^v/i, "")
+    .split(".")
+    .map((part) => Number(part) || 0);
+  const b = right
+    .replace(/^v/i, "")
+    .split(".")
+    .map((part) => Number(part) || 0);
   const length = Math.max(a.length, b.length);
   for (let index = 0; index < length; index += 1) {
     const diff = (a[index] ?? 0) - (b[index] ?? 0);
@@ -453,7 +499,7 @@ function normalizeStringList(value: unknown, fallback: string[]): string[] {
   if (!Array.isArray(value)) {
     return fallback;
   }
-  const normalized = value.map((item) => String(item ?? "").trim()).filter(Boolean);
+  const normalized = value.map(toSafeString).filter(Boolean);
   return normalized.length ? normalized : fallback;
 }
 
@@ -463,11 +509,14 @@ function normalizeVersionString(value: unknown): string | undefined {
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {
-  if (value == null) {
-    return undefined;
-  }
-  const text = String(value).trim();
+  const text = toSafeString(value);
   return text || undefined;
+}
+
+function toSafeString(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+    ? String(value).trim()
+    : "";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

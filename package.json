@@ -1,10 +1,11 @@
 {
   "name": "codex-accounts-manager",
-  "displayName": "Codex Accounts Manager",
+  "displayName": "Codex Manager",
   "description": "Manage multiple Codex accounts in VS Code, inspect quota, and switch the active global auth.json.",
-  "version": "0.1.18",
+  "version": "0.1.19-pre.5",
   "publisher": "wannanbigpig",
-  "icon": "media/CT_logo_transparent_square_hd.png",
+  "preview": true,
+  "icon": "media/product-icons/codex-openai.png",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -21,11 +22,21 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "icons": {
+      "codex-openai": {
+        "description": "Codex (OpenAI)",
+        "default": {
+          "fontPath": "./media/product-icons/codex-icons.woff",
+          "fontCharacter": "\\EA01"
+        }
+      }
+    },
     "configuration": {
       "title": "Codex Accounts",
       "properties": {
         "codexAccounts.codexAppRestartMode": {
           "type": "string",
+          "scope": "machine",
           "enum": [
             "auto",
             "manual"
@@ -35,6 +46,7 @@
         },
         "codexAccounts.codexAppRestartEnabled": {
           "type": "boolean",
+          "scope": "machine",
           "default": false,
           "markdownDescription": "Whether Codex Accounts Manager should manage the ChatGPT/Codex desktop app when switching accounts. Turn this off to skip restart prompts and app handling entirely."
         },
@@ -77,18 +89,44 @@
           "minimum": 0,
           "maximum": 60,
           "multipleOf": 1,
-          "default": 0,
-          "markdownDescription": "Automatically refresh saved account quotas every N minutes. Set to `0` to disable, or choose any interval from `1` to `60` minutes."
+          "default": 15,
+          "markdownDescription": "Automatically refresh all saved account quotas every N minutes. Set to `0` to disable, or choose any interval from `1` to `60` minutes."
+        },
+        "codexAccounts.autoRefreshCurrentMinutes": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60,
+          "multipleOf": 1,
+          "default": 1,
+          "markdownDescription": "Automatically refresh only the current active account quota every N minutes. Set to `0` to disable, or choose any interval from `1` to `60` minutes."
+        },
+        "codexAccounts.usageHistoryRetentionDays": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 90,
+          "multipleOf": 1,
+          "default": 7,
+          "markdownDescription": "How long quota graph history is retained. Choose a retention period from `1` to `90` days."
+        },
+        "codexAccounts.autoResumeCodexSessions": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Reopen the official VS Code Codex conversation tabs that were open in this workspace after VS Code starts or reloads. Stores only the tab URIs and labels; it does not inspect accounts or conversation content."
+        },
+        "codexAccounts.cliIntegrationEnabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Allow the dashboard to read local Codex CLI session indexes and transcripts on demand, and gate automatic VS Code Codex session resume. No session files are read while this is disabled."
         },
         "codexAccounts.backgroundTokenRefreshEnabled": {
           "type": "boolean",
-          "default": true,
-          "markdownDescription": "Automatically refresh saved account tokens in the background before they expire while VS Code is running."
+          "default": false,
+          "markdownDescription": "Allow the extension to refresh saved account tokens in the background. Disabled by default; Codex manages its own token refresh unless you enable this."
         },
         "codexAccounts.autoSwitchEnabled": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Automatically switch away from the active account when its quota falls below the configured hourly or weekly threshold. Candidate accounts are ranked by the best matching remaining quota."
+          "markdownDescription": "Automatically switch away from the active account when its quota falls below the configured hourly or weekly threshold. Candidates are ranked by highest remaining 5-hour quota, then highest weekly quota."
         },
         "codexAccounts.hourlyQuotaControlEnabled": {
           "type": "boolean",
@@ -123,6 +161,7 @@
         },
         "codexAccounts.codexAppPath": {
           "type": "string",
+          "scope": "machine",
           "default": "",
           "markdownDescription": "Optional custom path to the Codex desktop app. If empty, the extension uses built-in platform-specific detection."
         },
@@ -166,6 +205,19 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Enable sanitized network debug logs for Codex Accounts Manager requests in the `Codex Accounts Network` output channel."
+        },
+        "codexAccounts.encryptedSyncEnabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "ignoreSync": true,
+          "markdownDescription": "Synchronize saved account sessions and the per-account PC enablement registry through VS Code Settings Sync using a client-side encrypted vault. A signed-in VS Code Settings Sync machine can use Sync after entering the same passphrase. Sync is run after account toggles to share the latest registry; account usage, switching, and schedules never create sync traffic."
+        },
+        "codexAccounts.webDashboardEnabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Run the local browser dashboard on 127.0.0.1:39875. Protect it with a password using the Set Web Dashboard Password command."
         }
       }
     },
@@ -217,6 +269,30 @@
       {
         "command": "codexAccounts.showQuotaSummary",
         "title": "Codex Accounts: Show Quota Summary"
+      },
+      {
+        "command": "codexAccounts.showShortcuts",
+        "title": "Codex Accounts: Keyboard Shortcuts & Help"
+      },
+      {
+        "command": "codexAccounts.resumeCodexSessions",
+        "title": "Codex Accounts: Resume Saved VS Code Codex Sessions"
+      },
+      {
+        "command": "codexAccounts.resumeLatestCodexCliSession",
+        "title": "Codex Accounts: Open Latest Codex CLI Session in VS Code"
+      },
+      {
+        "command": "codexAccounts.configureEncryptedSync",
+        "title": "Codex Accounts: Configure Encrypted Session Sync"
+      },
+      {
+        "command": "codexAccounts.syncNow",
+        "title": "Codex Accounts: Sync Sessions Now"
+      },
+      {
+        "command": "codexAccounts.setWebDashboardPassword",
+        "title": "Codex Accounts: Set Web Dashboard Password"
       }
     ],
     "menus": {}
@@ -248,7 +324,7 @@
     "preact": "^10.29.0",
     "prettier": "^3.2.5",
     "typescript": "^5.7.2",
-    "vite": "^6.4.1",
+    "vite": "^6.4.3",
     "vitest": "^4.1.1"
   }
 }

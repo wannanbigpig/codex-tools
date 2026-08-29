@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { CodexAccountRecord } from "../src/core/types";
 import { buildAccountStorageId } from "../src/utils/accountIdentity";
-import { cloneIndex, parseAccountsIndex, syncActiveAccountState } from "../src/storage/accountsIndex";
+import { cloneIndex, markActive, parseAccountsIndex, syncActiveAccountState } from "../src/storage/accountsIndex";
 import { buildAccountRecordDraft } from "../src/storage/accountMetadata";
 import {
   addAccountTags,
   dismissAccountHealthIssue,
   removeAccountFromIndex,
   removeAccountTags,
+  setAccountEnabled,
+  setAccountQueuePriority,
   setStatusBarVisibility,
   switchActiveAccount
 } from "../src/storage/accountMutations";
@@ -45,11 +47,40 @@ describe("accountsIndex helpers", () => {
       ]
     });
 
-    const changed = syncActiveAccountState(index, "a");
+    const changed = syncActiveAccountState(index, "a", 50);
 
     expect(changed).toBe(true);
     expect(index.currentAccountId).toBe("a");
     expect(index.accounts.map((account) => account.isActive)).toEqual([true, false]);
+    expect(index.accounts[0]?.sessionStartedAt).toBe(50);
+
+    expect(syncActiveAccountState(index, "a", 100)).toBe(false);
+    expect(index.accounts[0]?.sessionStartedAt).toBe(50);
+  });
+
+  it("accumulates completed usage separately for each account", () => {
+    const index = cloneIndex({
+      currentAccountId: "a",
+      accounts: [
+        {
+          id: "a",
+          email: "a@example.com",
+          isActive: true,
+          sessionStartedAt: 1_000,
+          totalUsageMs: 5_000,
+          createdAt: 1,
+          updatedAt: 1
+        },
+        { id: "b", email: "b@example.com", isActive: false, createdAt: 1, updatedAt: 1 }
+      ]
+    });
+
+    markActive(index, "b", 11_000);
+
+    expect(index.accounts[0]?.totalUsageMs).toBe(15_000);
+    expect(index.accounts[0]?.sessionStartedAt).toBeUndefined();
+    expect(index.accounts[1]?.totalUsageMs).toBeUndefined();
+    expect(index.accounts[1]?.sessionStartedAt).toBe(11_000);
   });
 
   it("parses a valid index payload", () => {
@@ -149,6 +180,40 @@ describe("sharedAccounts helpers", () => {
 
     expect(toSharedEntries(sessionEntry)).toEqual([sessionEntry]);
     expect(() => previewSharedEntry(sessionEntry)).toThrowError(/Shared account JSON does not include valid tokens/);
+  });
+
+  it("accepts an exported account when an old access token is no longer a JWT", () => {
+    const idToken = createJwt({
+      "https://api.openai.com/auth": {
+        chatgpt_account_id: "acct_existing"
+      }
+    });
+    const entry = {
+      id: buildAccountStorageId("existing@example.com", "acct_existing"),
+      email: "existing@example.com",
+      account_id: "acct_existing",
+      tokens: {
+        id_token: idToken,
+        access_token: "invalidated-opaque-access-token",
+        refresh_token: "refresh-token",
+        account_id: "acct_existing"
+      }
+    };
+
+    expect(previewSharedEntry(entry)).toEqual({
+      storageId: buildAccountStorageId("existing@example.com", "acct_existing"),
+      email: "existing@example.com"
+    });
+    expect(previewSharedAccountsImportEntries([entry], new Set([entry.id]))).toMatchObject({
+      valid: 1,
+      overwriteCount: 1,
+      invalidCount: 0
+    });
+    expect(previewSharedAccountsImportEntries([entry], new Set())).toMatchObject({
+      valid: 1,
+      overwriteCount: 0,
+      invalidCount: 0
+    });
   });
 
   it("maps shared quota payloads into internal summaries", () => {
@@ -278,6 +343,40 @@ describe("sharedAccounts helpers", () => {
 
     expect(restored.subscriptionActiveUntil).toBe("1900000000");
   });
+
+  it("keeps enablement and queue priority local when exporting and importing shared sessions", () => {
+    const account: CodexAccountRecord = {
+      id: "local-account",
+      email: "local@example.com",
+      isActive: false,
+      enabled: false,
+      queuePriority: true,
+      createdAt: 1_000,
+      updatedAt: 2_000
+    };
+    const shared = toSharedAccountJson(account, {
+      idToken: "id-token",
+      accessToken: "access-token"
+    });
+
+    expect(shared).not.toHaveProperty("enabled");
+    expect(shared).not.toHaveProperty("queue_priority");
+
+    const locallyEnabled: CodexAccountRecord = {
+      ...account,
+      enabled: true,
+      queuePriority: false
+    };
+    applySharedAccountEntry(locallyEnabled, {
+      ...shared,
+      plan_type: "pro",
+      queue_priority: true
+    });
+
+    expect(locallyEnabled.enabled).toBe(true);
+    expect(locallyEnabled.queuePriority).toBe(false);
+    expect(locallyEnabled.planType).toBe("pro");
+  });
 });
 
 describe("accountMetadata helpers", () => {
@@ -326,6 +425,38 @@ describe("accountMetadata helpers", () => {
 });
 
 describe("accountMutations helpers", () => {
+  it("persists automation enablement without blocking manual switching or changing status visibility", () => {
+    const index = cloneIndex({
+      currentAccountId: "a",
+      accounts: [
+        { id: "a", email: "a@example.com", isActive: true, createdAt: 1, updatedAt: 1 },
+        { id: "b", email: "b@example.com", isActive: false, showInStatusBar: true, createdAt: 1, updatedAt: 1 }
+      ]
+    });
+
+    const disabled = setAccountEnabled(index, "b", false, 20);
+
+    expect(disabled?.enabled).toBe(false);
+    expect(disabled?.updatedAt).toBe(1);
+    expect(disabled?.showInStatusBar).toBe(true);
+
+    const switched = switchActiveAccount(index, "b", 30);
+    expect(switched?.isActive).toBe(true);
+    expect(switched?.enabled).toBe(false);
+    expect(switched?.sessionStartedAt).toBe(30);
+  });
+
+  it("keeps queue priority local without changing shared account freshness", () => {
+    const index = cloneIndex({
+      accounts: [{ id: "a", email: "a@example.com", isActive: false, createdAt: 1, updatedAt: 1 }]
+    });
+
+    const prioritized = setAccountQueuePriority(index, "a", true, 20);
+
+    expect(prioritized?.queuePriority).toBe(true);
+    expect(prioritized?.updatedAt).toBe(1);
+  });
+
   it("updates dismissed health issues in place", () => {
     const index = cloneIndex({
       currentAccountId: "a",

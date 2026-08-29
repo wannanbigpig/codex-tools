@@ -4,6 +4,23 @@ import { formatResetRelativeTime } from "../../src/utils/resetTime";
 
 type SensitiveKind = "email" | "id" | "name";
 
+export function isAccountAttention(account: DashboardAccountViewModel): boolean {
+  return (
+    !account.dismissedHealth &&
+    (account.healthKind === "reauthorize" ||
+      account.healthKind === "refresh_failed" ||
+      account.healthKind === "disabled" ||
+      account.healthKind === "quota")
+  );
+}
+
+export function countAccountEnablement(
+  accounts: readonly DashboardAccountViewModel[]
+): { enabled: number; disabled: number } {
+  const enabled = accounts.filter((account) => account.enabled).length;
+  return { enabled, disabled: accounts.length - enabled };
+}
+
 export function createShareFileName(): string {
   const now = new Date();
   const year = String(now.getFullYear());
@@ -69,6 +86,24 @@ export function formatTimestamp(epochMs: number | undefined, fallback: string): 
   return new Date(epochMs).toLocaleString();
 }
 
+export function formatRelativeTimestamp(
+  epochMs: number | undefined,
+  now: number,
+  fallback: string,
+  lang: DashboardState["lang"]
+): string {
+  if (!epochMs) return fallback;
+  const minutes = Math.floor(Math.max(0, now - epochMs) / 60_000);
+  const zh = lang === "zh";
+  const hant = lang === "zh-hant";
+  if (minutes < 1) return zh ? "刚刚" : hant ? "剛剛" : "Just now";
+  if (minutes < 60) return zh ? `${minutes} 分钟前` : hant ? `${minutes} 分鐘前` : `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return zh ? `${hours} 小时前` : hant ? `${hours} 小時前` : `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return zh ? `${days} 天前` : hant ? `${days} 天前` : `${days}d ago`;
+}
+
 export function formatResetLabel(
   resetAt: number | undefined,
   fallback: string,
@@ -118,7 +153,30 @@ export function formatSavedAccountsSummary(
 }
 
 export function resolveOverviewAccount(accounts: DashboardAccountViewModel[]): DashboardAccountViewModel | undefined {
-  return accounts.find((account) => account.isActive) ?? accounts.find((account) => account.isCurrentWindowAccount);
+  return (
+    accounts.find((account) => account.switchQueued) ??
+    accounts.find((account) => account.isActive) ??
+    accounts.find((account) => account.isCurrentWindowAccount)
+  );
+}
+
+export function resolveBrandSubtitle(
+  fallback: string,
+  syncEnabled: boolean | undefined,
+  lastCompletedAt: number | undefined,
+  enabledSessionCount: number | undefined,
+  sessionCount: number | undefined,
+  accountCount: number,
+  formatDate: (epochMs: number) => string = (epochMs) =>
+    new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(epochMs)
+): string {
+  if (!syncEnabled || !lastCompletedAt) {
+    return fallback;
+  }
+
+  return `Synced ${formatDate(lastCompletedAt)} · ${enabledSessionCount ?? 0} enabled / ${
+    sessionCount ?? accountCount
+  } sessions`;
 }
 
 export function normalizeThresholds(green: number, yellow: number): { green: number; yellow: number } {

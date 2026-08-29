@@ -1,11 +1,17 @@
 import * as vscode from "vscode";
 import type { CodexAccountRecord } from "../../core/types";
 import { getCodexAccountsConfiguration } from "../../infrastructure/config/extensionSettings";
-import { needsWindowReloadForAccount } from "../../presentation/workbench/windowRuntimeAccount";
+import {
+  getCurrentWindowRuntimeAccountId,
+  clearQueuedAccountSwitch,
+  needsWindowReloadForAccount,
+  queueAccountSwitch
+} from "../../presentation/workbench/windowRuntimeAccount";
 import { getCodexAppRestartCopy, getCodexAppState, getCommandCopy, restartCodexAppIfInstalled } from "../../utils";
 
 const CODEX_APP_RESTART_MODE = "codexAppRestartMode";
 const CODEX_APP_RESTART_ENABLED = "codexAppRestartEnabled";
+let reloadPromptInFlight: Promise<boolean> | undefined;
 
 export async function handleCodexAppRestartPreference(options?: { allowManualPrompt?: boolean }): Promise<void> {
   if (!getCodexAccountsConfiguration().get<boolean>(CODEX_APP_RESTART_ENABLED, false)) {
@@ -35,25 +41,78 @@ export async function handleCodexAppRestartPreference(options?: { allowManualPro
   }
 }
 
-export async function promptWindowReloadForAccount(account: Pick<CodexAccountRecord, "id" | "email">): Promise<boolean> {
+export async function promptWindowReloadForAccount(
+  account: Pick<CodexAccountRecord, "id" | "email">,
+  options?: { message?: string }
+): Promise<boolean> {
   if (!needsWindowReloadForAccount(account.id)) {
+    clearQueuedAccountSwitch();
     return false;
   }
 
-  const copy = getCommandCopy();
-  const choice = await vscode.window.showInformationMessage(copy.switchedAndAskReload(account.email), copy.reloadNow, copy.later);
-  if (choice === copy.reloadNow) {
-    await vscode.commands.executeCommand("workbench.action.reloadWindow");
-    return true;
+  if (reloadPromptInFlight) {
+    return reloadPromptInFlight;
   }
-  return false;
+
+  reloadPromptInFlight = (async () => {
+    const copy = getCommandCopy();
+    const choice = await vscode.window.showInformationMessage(
+      options?.message ?? copy.switchedAndAskReload(account.email),
+      copy.reloadNow,
+      copy.later
+    );
+    if (choice === copy.reloadNow) {
+      clearQueuedAccountSwitch();
+      await reloadExtensionHostWithWindowFallback();
+      return true;
+    }
+    const currentWindowAccountId = getCurrentWindowRuntimeAccountId();
+    if (currentWindowAccountId && currentWindowAccountId !== account.id) {
+      queueAccountSwitch(account.id, currentWindowAccountId);
+    } else {
+      clearQueuedAccountSwitch();
+    }
+    return false;
+  })().finally(() => {
+    reloadPromptInFlight = undefined;
+  });
+
+  return reloadPromptInFlight;
 }
 
 export async function autoReloadWindowForAccount(accountId?: string): Promise<boolean> {
   if (!needsWindowReloadForAccount(accountId)) {
+    clearQueuedAccountSwitch();
     return false;
   }
 
-  await vscode.commands.executeCommand("workbench.action.reloadWindow");
+  clearQueuedAccountSwitch();
+  await reloadExtensionHostWithWindowFallback();
   return true;
+}
+
+/** Record a browser-dashboard switch that the current window has not reloaded for yet. */
+export function deferWindowReloadForAccount(accountId: string): boolean {
+  if (!needsWindowReloadForAccount(accountId)) {
+    clearQueuedAccountSwitch();
+    return false;
+  }
+  const currentWindowAccountId = getCurrentWindowRuntimeAccountId();
+  if (currentWindowAccountId && currentWindowAccountId !== accountId) {
+    queueAccountSwitch(accountId, currentWindowAccountId);
+    return true;
+  }
+  clearQueuedAccountSwitch();
+  return false;
+}
+
+async function reloadExtensionHostWithWindowFallback(): Promise<void> {
+  await vscode.commands.executeCommand("codexAccounts.prepareDashboardForExtensionHostRestart");
+  await vscode.commands.executeCommand("codexAccounts.captureCodexSessions");
+  try {
+    await vscode.commands.executeCommand("workbench.action.restartExtensionHost");
+  } catch (error) {
+    console.warn("[codexAccounts] extension host restart failed; reloading the VS Code window", error);
+    await vscode.commands.executeCommand("workbench.action.reloadWindow");
+  }
 }

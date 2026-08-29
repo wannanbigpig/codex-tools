@@ -3,6 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AnnouncementService, filterAnnouncements, normalizeAnnouncementResponse } from "../src/services/announcements";
+import { removeTestDirectory } from "./testFilesystem";
 
 let tempDirs: string[] = [];
 
@@ -15,9 +16,9 @@ async function makeTempDir(): Promise<string> {
 afterEach(async () => {
   delete process.env["CODEX_ACCOUNTS_ANNOUNCEMENT_FILE"];
   delete process.env["CODEX_ACCOUNTS_ANNOUNCEMENT_DEV_LOCAL"];
-  await Promise.all(tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })));
+  await Promise.all(tempDirs.map((dir) => removeTestDirectory(dir)));
   tempDirs = [];
-});
+}, 15_000);
 
 describe("AnnouncementService", () => {
   it("filters localized announcements and sorts pinned items first", () => {
@@ -81,6 +82,20 @@ describe("AnnouncementService", () => {
 
     expect(filtered[0]?.title).toBe("English title");
     expect(filtered[0]?.content).toBe("English content");
+  });
+
+  it("drops unsafe remote announcement actions", () => {
+    const normalized = normalizeAnnouncementResponse({
+      announcements: [
+        { id: "safe", action: { type: "url", target: "https://openai.com", label: "Open" } },
+        { id: "script", action: { type: "url", target: "javascript:alert(1)", label: "Run" } },
+        { id: "command", action: { type: "command", target: "workbench.action.terminal.new", label: "Run" } }
+      ]
+    });
+
+    expect(normalized.announcements[0]?.action?.target).toBe("https://openai.com");
+    expect(normalized.announcements[1]?.action).toBeUndefined();
+    expect(normalized.announcements[2]?.action).toBeUndefined();
   });
 
   it("adds marketplace wait hint only when current version is behind release version", () => {

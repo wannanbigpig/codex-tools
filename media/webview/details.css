@@ -390,46 +390,6 @@ html[data-theme="auto"] body.vscode-light .pill.error {
   box-shadow: none;
   min-height: 2px;
 }
-.usage-bar::after {
-  content: attr(data-tip);
-  position: absolute;
-  left: 50%;
-  bottom: calc(var(--bar-height) + 14px);
-  transform: translateX(-50%);
-  min-width: 120px;
-  padding: 6px 9px;
-  border-radius: 10px;
-  background: rgba(24, 29, 48, 0.94);
-  border: 1px solid rgba(255,255,255,0.08);
-  color: var(--text);
-  font-size: 12px;
-  line-height: 1.4;
-  text-align: center;
-  opacity: 0;
-  pointer-events: none;
-  box-shadow: var(--shadow);
-  transition: opacity 120ms ease;
-  white-space: pre-line;
-}
-.usage-bar:hover::after {
-  opacity: 1;
-}
-.usage-bar.edge-left::after {
-  left: 0;
-  transform: none;
-}
-.usage-bar.edge-right::after {
-  left: auto;
-  right: 0;
-  transform: none;
-}
-html[data-theme="light"] .usage-bar::after,
-html[data-theme="auto"] body.vscode-light .usage-bar::after {
-  background: rgba(255, 255, 255, 0.96);
-  border-color: rgba(15, 23, 42, 0.12);
-  color: #1f2937;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
-}
 .usage-axis {
   display: flex;
   justify-content: space-between;

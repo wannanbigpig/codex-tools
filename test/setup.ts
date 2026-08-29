@@ -16,9 +16,24 @@ vi.mock("vscode", () => ({
     onDidChangeConfiguration: vi.fn()
   },
   window: {
+    showInputBox: vi.fn(),
     showOpenDialog: vi.fn(),
+    showQuickPick: vi.fn(),
     showWarningMessage: vi.fn(),
-    showInformationMessage: vi.fn()
+    showInformationMessage: vi.fn(),
+    showErrorMessage: vi.fn(),
+    withProgress: vi.fn(async (_options, task) =>
+      task(
+        { report: vi.fn() },
+        {
+          isCancellationRequested: false,
+          onCancellationRequested: vi.fn()
+        }
+      )
+    )
+  },
+  ProgressLocation: {
+    Notification: 15
   },
   ConfigurationTarget: {
     Global: 1,

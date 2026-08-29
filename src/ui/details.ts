@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
-import { needsRefresh, refreshTokens } from "../auth/oauth";
+import { needsTokenRefresh, refreshTokens } from "../auth/oauth";
+import { isBackgroundTokenRefreshEnabled } from "../infrastructure/config/extensionSettings";
 import { CodexAccountRecord, CodexDailyUsageBreakdown, CodexDailyUsagePoint } from "../core/types";
 import { resolveAccountHealth, isHealthDismissed } from "../application/accounts/health";
 import { resolveSubscriptionDisplay } from "../application/dashboard/buildDashboardState";
@@ -24,6 +25,7 @@ import {
   resolveLongQuotaLabel
 } from "../utils";
 import { formatRelativeReset, formatTimestamp } from "../utils/time";
+import { CrossWindowOperationBusyError, runCrossWindowExclusive } from "../utils/crossWindowOperations";
 
 let detailsPanel: vscode.WebviewPanel | undefined;
 let detailsPanelRequestId = 0;
@@ -106,10 +108,19 @@ export function openDetailsPanel(
           label: current.email
         });
         if (tags === undefined) {
+          void vscode.window.showInformationMessage("Account tag update cancelled.");
           return;
         }
-        await detailsPanelState.repo.setAccountTags(current.id, tags);
-        await refreshDetailsPanel();
+        try {
+          await detailsPanelState.repo!.setAccountTags(current.id, tags);
+          await refreshDetailsPanel();
+          void vscode.window.showInformationMessage(`Updated tags for ${current.email}.`);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          void (error instanceof CrossWindowOperationBusyError
+            ? vscode.window.showWarningMessage(detail)
+            : vscode.window.showErrorMessage(`Could not update account tags: ${detail}`));
+        }
         return;
       }
 
@@ -178,8 +189,13 @@ async function getFreshUsageTokens(
   repo: AccountsRepository,
   accountId: string
 ): Promise<Awaited<ReturnType<AccountsRepository["getTokens"]>>> {
-  const tokens = await repo.getTokens(accountId);
-  if (!tokens?.accessToken || !needsRefresh(tokens.accessToken)) {
+  const tokens = await repo.getTokens(accountId, { bypassCache: true });
+  if (!tokens?.accessToken || !needsTokenRefresh(tokens)) {
+    return tokens;
+  }
+
+  const account = await repo.getAccount(accountId);
+  if (!isBackgroundTokenRefreshEnabled() || account?.tokenRefreshEnabled !== true) {
     return tokens;
   }
 
@@ -187,7 +203,17 @@ async function getFreshUsageTokens(
     return tokens;
   }
 
-  const refreshed = await refreshTokens(tokens.refreshToken, tokens.idToken);
+  const refreshed = await runCrossWindowExclusive(`background:token-refresh:${accountId}`, "Token refresh", () =>
+    refreshTokens(tokens.refreshToken!, tokens.idToken)
+  ).catch((error: unknown) => {
+    if (error instanceof CrossWindowOperationBusyError) {
+      return undefined;
+    }
+    throw error;
+  });
+  if (!refreshed) {
+    return tokens;
+  }
   await repo.updateTokens(accountId, {
     ...refreshed,
     accountId: refreshed.accountId ?? tokens.accountId
@@ -497,10 +523,10 @@ function renderUsageSection(
     .map((point, index) => {
       const totalValue = point.totalTokens;
       const height = Math.max(2, Math.round((totalValue / max) * 100));
-      const tooltip = escapeHtml(buildUsageTooltip(point, surfaceKeys, copy));
+      const usageTitle = escapeHtmlAttr(buildUsageTitle(point, surfaceKeys, copy));
       const edgeClass = index === 0 ? " edge-left" : index === usage.points.length - 1 ? " edge-right" : "";
       const segments = renderUsageSegments(point, surfaceKeys, totalValue, copy);
-      return `<div class="usage-bar${totalValue <= 0 ? " is-zero" : ""}${edgeClass}" data-tip="${tooltip}" style="--bar-height:${height}%;">
+      return `<div class="usage-bar${totalValue <= 0 ? " is-zero" : ""}${edgeClass}" title="${usageTitle}" style="--bar-height:${height}%;">
         <div class="usage-bar-fill" style="height:${height}%;">${segments}</div>
       </div>`;
     })
@@ -645,7 +671,7 @@ function renderUsageSegments(
   return segments || `<div class="usage-segment usage-segment-empty" style="height:100%;"></div>`;
 }
 
-function buildUsageTooltip(point: CodexDailyUsagePoint, surfaceKeys: string[], copy: DetailCopy): string {
+function buildUsageTitle(point: CodexDailyUsagePoint, surfaceKeys: string[], copy: DetailCopy): string {
   const lines = [formatUsageDate(point.date, copy.lang)];
   const totalValue = point.totalTokens;
 

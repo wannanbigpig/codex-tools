@@ -456,7 +456,9 @@ function normalizeEmail(email: string | undefined): string | undefined {
 }
 
 function hasRequiredIdentityMismatch(expected: string | undefined, candidate: string | undefined): boolean {
-  return Boolean(expected && expected !== candidate);
+  // Legacy/opaque tokens can omit optional identity claims. Treat a missing
+  // claim as unknown and reject only explicit contradictions.
+  return Boolean(expected && candidate && expected !== candidate);
 }
 
 async function readJsonFile(filePath: string): Promise<JsonRecord | undefined> {

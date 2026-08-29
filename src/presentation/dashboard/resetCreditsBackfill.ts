@@ -2,6 +2,7 @@ import type { DashboardAccountViewModel } from "../../domain/dashboard/types";
 import { AccountsRepository } from "../../storage";
 import { fetchResetCredits } from "../../services/quota";
 import { logNetworkEvent } from "../../utils/debug";
+import { CrossWindowOperationBusyError, runCrossWindowExclusive } from "../../utils/crossWindowOperations";
 
 const RESET_CREDITS_BACKFILL_COOLDOWN_MS = 60_000;
 const inflightResetCreditsBackfills = new Set<string>();
@@ -30,6 +31,28 @@ export async function backfillMissingResetCreditExpiries(
   accounts: readonly DashboardAccountViewModel[],
   onUpdated: () => void,
   now = Date.now()
+): Promise<boolean> {
+  try {
+    return await runCrossWindowExclusive("background:reset-credits-refresh", "Reset credits refresh", async () => {
+      try {
+        return await backfillMissingResetCreditExpiriesInternal(repo, accounts, onUpdated, now);
+      } finally {
+        await repo.flush?.();
+      }
+    });
+  } catch (error) {
+    if (error instanceof CrossWindowOperationBusyError) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function backfillMissingResetCreditExpiriesInternal(
+  repo: AccountsRepository,
+  accounts: readonly DashboardAccountViewModel[],
+  onUpdated: () => void,
+  now: number
 ): Promise<boolean> {
   const targets = pickResetCreditsBackfillTargets(accounts, now);
   if (targets.length === 0) {

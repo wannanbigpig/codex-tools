@@ -17,8 +17,14 @@ export class ExtensionSettingsStore {
       dashboardTheme: normalizeDashboardTheme(config.get<string>("dashboardTheme", "auto")),
       codexAppRestartEnabled: config.get<boolean>("codexAppRestartEnabled", false),
       codexAppRestartMode: config.get<"auto" | "manual">("codexAppRestartMode") ?? "manual",
-      backgroundTokenRefreshEnabled: config.get<boolean>("backgroundTokenRefreshEnabled", true),
-      autoRefreshMinutes: normalizeAutoRefreshMinutes(config.get<number>("autoRefreshMinutes", 0)),
+      backgroundTokenRefreshEnabled: config.get<boolean>("backgroundTokenRefreshEnabled", false),
+      cliIntegrationEnabled: config.get<boolean>("cliIntegrationEnabled", false),
+      autoResumeCodexSessions: config.get<boolean>("autoResumeCodexSessions", false),
+      autoRefreshMinutes: normalizeAutoRefreshMinutes(config.get<number>("autoRefreshMinutes", 15)),
+      autoRefreshCurrentMinutes: normalizeAutoRefreshMinutes(config.get<number>("autoRefreshCurrentMinutes", 1)),
+      usageHistoryRetentionDays: normalizeUsageHistoryRetentionDays(
+        config.get<number>("usageHistoryRetentionDays", 7)
+      ),
       autoSwitchEnabled: config.get<boolean>("autoSwitchEnabled", false),
       hourlyQuotaControlEnabled: config.get<boolean>("hourlyQuotaControlEnabled", false),
       autoSwitchReloadWindowEnabled: config.get<boolean>("autoSwitchReloadWindowEnabled", false),
@@ -32,6 +38,10 @@ export class ExtensionSettingsStore {
       quotaGreenThreshold: thresholds.green,
       quotaYellowThreshold: thresholds.yellow,
       debugNetwork: config.get<boolean>("debugNetwork", false),
+      encryptedSyncEnabled: config.get<boolean>("encryptedSyncEnabled", false),
+      // Runtime-owned and password-gated; buildDashboardState replaces this placeholder.
+      encryptedSyncRegistryOverrideEnabled: false,
+      webDashboardEnabled: config.get<boolean>("webDashboardEnabled", false),
       displayLanguage: config.get<DashboardLanguageOption>("displayLanguage", "auto")
     };
   }
@@ -62,16 +72,28 @@ export function normalizeAutoRefreshMinutes(value: number): number {
   return Math.max(1, Math.min(60, Math.round(value)));
 }
 
+export function normalizeUsageHistoryRetentionDays(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 7;
+  }
+
+  return Math.max(1, Math.min(90, Math.round(value)));
+}
+
 export function getCodexAccountsConfiguration(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration(CODEX_ACCOUNTS_SECTION);
 }
 
 export function getAutoRefreshMinutes(): number {
-  return normalizeAutoRefreshMinutes(getCodexAccountsConfiguration().get<number>("autoRefreshMinutes", 0));
+  return normalizeAutoRefreshMinutes(getCodexAccountsConfiguration().get<number>("autoRefreshMinutes", 15));
+}
+
+export function getAutoRefreshCurrentMinutes(): number {
+  return normalizeAutoRefreshMinutes(getCodexAccountsConfiguration().get<number>("autoRefreshCurrentMinutes", 1));
 }
 
 export function isBackgroundTokenRefreshEnabled(): boolean {
-  return getCodexAccountsConfiguration().get<boolean>("backgroundTokenRefreshEnabled", true);
+  return getCodexAccountsConfiguration().get<boolean>("backgroundTokenRefreshEnabled", false);
 }
 
 export function isHourlyQuotaControlEnabled(): boolean {
@@ -95,7 +117,7 @@ export function normalizeQuotaWarningThreshold(value: number): number {
   return Math.max(5, Math.min(90, snapped));
 }
 
-function normalizeAutoSwitchLockMinutes(value: number): number {
+export function normalizeAutoSwitchLockMinutes(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
   }

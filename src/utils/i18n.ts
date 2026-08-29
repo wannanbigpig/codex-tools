@@ -169,9 +169,15 @@ export type TranslationKey =
   | "quotaWarning.hourlyLabel"
   | "quotaWarning.weeklyLabel"
   | "quotaWarning.reviewLabel"
+  | "quotaWarning.balanceLabel"
   | "quotaWarning.message"
   | "quotaWarning.dismiss"
   | "quotaWarning.switchNow"
+  | "quotaWarning.switchAccount"
+  | "quotaWarning.resetAccount"
+  | "quotaWarning.selectAccount"
+  | "quotaWarning.autoSelect"
+  | "quotaWarning.later"
   // Status Toggle
   | "statusToggle.alwaysShown"
   | "statusToggle.added"
@@ -388,9 +394,14 @@ export function getQuotaWarningCopy(): {
   hourlyLabel: string;
   weeklyLabel: string;
   reviewLabel: string;
+  balanceSummary: (quotaLabel: string, value: number) => string;
   message: (account: string, quota: string, value: number, threshold: number) => string;
-  dismiss: string;
-  switchNow: string;
+  switchAccount: (account: string) => string;
+  resetAccount: (account: string) => string;
+  resetAvailableSummary: (weeklyLabel: string, weeklyValue: number) => string;
+  selectAccount: string;
+  autoSelect: string;
+  later: string;
 } {
   const _t = t();
 
@@ -398,8 +409,15 @@ export function getQuotaWarningCopy(): {
     hourlyLabel: _t("quotaWarning.hourlyLabel"),
     weeklyLabel: _t("quotaWarning.weeklyLabel"),
     reviewLabel: _t("quotaWarning.reviewLabel"),
-    dismiss: _t("quotaWarning.dismiss"),
-    switchNow: _t("quotaWarning.switchNow"),
+    switchAccount: (account: string) => `${_t("quotaWarning.switchAccount")} ${account}`,
+    resetAccount: (account: string) => `${_t("quotaWarning.resetAccount")} ${account}`,
+    balanceSummary: (quotaLabel: string, value: number) =>
+      `${quotaLabel} ${value}% ${_t("quotaWarning.balanceLabel")}.`,
+    resetAvailableSummary: (weeklyLabel: string, weeklyValue: number) =>
+      `${weeklyLabel}: ${weeklyValue}% · ${_t("quotaWarning.resetAccount")}.`,
+    selectAccount: _t("quotaWarning.selectAccount"),
+    autoSelect: _t("quotaWarning.autoSelect"),
+    later: _t("quotaWarning.later"),
     message: (account: string, quota: string, value: number, threshold: number) =>
       _t("quotaWarning.message", { account, quota, value, threshold })
   };

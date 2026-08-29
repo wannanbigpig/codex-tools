@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import type { DashboardHostMessage } from "../../src/domain/dashboard/types";
 import type { SendAction } from "./hookTypes";
 import { useOAuthSessionModal } from "./oauthSessionHook";
@@ -8,14 +8,18 @@ export function useAccountSessionModal(params: {
   sendAction: SendAction;
   importJsonFileReadError: string;
   showCopyFeedback: (key: string) => void;
+  openAuthorizationInClient: boolean;
 }) {
   const [addAccountModalOpen, setAddAccountModalOpen] = useState(false);
   const [addAccountTab, setAddAccountTab] = useState<"oauth" | "import">("oauth");
   const [confirmCancelOauthOpen, setConfirmCancelOauthOpen] = useState(false);
   const [importRecoveryMode, setImportRecoveryMode] = useState(false);
+  const oauthPrepareAccountId = useRef<string | undefined>(undefined);
   const oauth = useOAuthSessionModal({
     sendAction: params.sendAction,
-    showCopyFeedback: params.showCopyFeedback
+    showCopyFeedback: params.showCopyFeedback,
+    openAuthorizationInClient: params.openAuthorizationInClient,
+    getPrepareAccountId: () => oauthPrepareAccountId.current
   });
   const sharedImport = useSharedImportModal({
     sendAction: params.sendAction,
@@ -24,6 +28,7 @@ export function useAccountSessionModal(params: {
 
   const performCloseAddAccountModal = (): void => {
     oauth.cancelSession();
+    oauthPrepareAccountId.current = undefined;
     setAddAccountModalOpen(false);
     setImportRecoveryMode(false);
     setAddAccountTab("oauth");
@@ -40,18 +45,36 @@ export function useAccountSessionModal(params: {
   };
 
   const openAddAccountModal = (): void => {
+    oauthPrepareAccountId.current = undefined;
     setAddAccountModalOpen(true);
     setAddAccountTab("oauth");
     setImportRecoveryMode(false);
     oauth.reset();
     sharedImport.clearImportFeedback();
-    params.sendAction("prepareOAuthSession");
+  };
+
+  const openReauthorizeModal = (accountId: string): void => {
+    setAddAccountModalOpen(true);
+    setAddAccountTab("oauth");
+    setImportRecoveryMode(false);
+    oauth.reset();
+    sharedImport.clearImportFeedback();
+    oauthPrepareAccountId.current = accountId;
   };
 
   const openRecoveryImportModal = (): void => {
+    oauthPrepareAccountId.current = undefined;
     setAddAccountModalOpen(true);
     setAddAccountTab("import");
     setImportRecoveryMode(true);
+    sharedImport.clearImportFeedback();
+  };
+
+  const openImportModal = (): void => {
+    oauthPrepareAccountId.current = undefined;
+    setAddAccountModalOpen(true);
+    setAddAccountTab("import");
+    setImportRecoveryMode(false);
     sharedImport.clearImportFeedback();
   };
 
@@ -98,8 +121,11 @@ export function useAccountSessionModal(params: {
     importRecoveryMode,
     confirmCancelOauthOpen,
     openAddAccountModal,
+    openReauthorizeModal,
     openRecoveryImportModal,
+    openImportModal,
     handleAddAccountTabChange,
+    handlePrepareOauthLink: oauth.handlePrepareOauthLink,
     handleCopyOauthLink: oauth.handleCopyOauthLink,
     handleStartOAuthAutoFlow: oauth.handleStartOAuthAutoFlow,
     handleCompleteOAuth: oauth.handleCompleteOAuth,

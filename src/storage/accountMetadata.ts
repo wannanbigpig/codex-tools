@@ -166,6 +166,8 @@ export function buildAccountRecordDraft(params: {
   return {
     id: params.storageId,
     loginAt: params.claims.loginAt ?? params.existing?.loginAt,
+    sessionStartedAt: params.existing?.sessionStartedAt,
+    totalUsageMs: params.existing?.totalUsageMs,
     email: params.claims.email,
     userId: params.claims.userId,
     authProvider: params.claims.authProvider,
@@ -185,6 +187,9 @@ export function buildAccountRecordDraft(params: {
       params.claims.organizationId
     ),
     isActive: params.forceActive,
+    enabled: params.forceActive ? true : (params.existing?.enabled ?? true),
+    queuePriority: params.existing?.queuePriority ?? false,
+    tokenRefreshEnabled: params.existing?.tokenRefreshEnabled ?? false,
     // New accounts should not silently opt into the status popup.
     showInStatusBar: params.existing?.showInStatusBar ?? false,
     dismissedHealthIssueKey: params.existing?.dismissedHealthIssueKey,
