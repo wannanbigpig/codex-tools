@@ -35,6 +35,13 @@ const REFRESH_ALL_MANUAL_CONCURRENCY = 2;
 const REFRESH_ALL_SILENT_DELAY_MS = 300;
 const REFRESH_ALL_MANUAL_DELAY_MS = 150;
 
+export type SwitchAccountCommandResult = {
+  status: "switched" | "already-active" | "cancelled";
+  account?: Pick<CodexAccountRecord, "id" | "email">;
+  reloadNeeded?: boolean;
+  reloaded?: boolean;
+};
+
 export class AccountsCommandService {
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -205,16 +212,17 @@ export class AccountsCommandService {
     );
   }
 
-  async switchAccount(item?: CodexAccountRecord): Promise<void> {
+  async switchAccount(item?: CodexAccountRecord): Promise<SwitchAccountCommandResult> {
     const copy = getCommandCopy();
     const account = item ?? (await this.pickSwitchAccount(copy.pickActivateAccount));
     if (!account) {
-      return;
+      void vscode.window.showInformationMessage("Switch account cancelled.");
+      return { status: "cancelled" };
     }
 
     if (account.isActive) {
       void vscode.window.showInformationMessage(copy.alreadyActive(formatAccountToastLabel(account)));
-      return;
+      return { status: "already-active", account };
     }
 
     await this.withProgress(copy.progressSwitch(account.email), async () => {
@@ -225,8 +233,13 @@ export class AccountsCommandService {
     this.view.markObservedAuthIdentity?.(account.id);
 
     await handleCodexAppRestartPreference({ allowManualPrompt: true });
+    const reloadNeeded = needsWindowReloadForAccount(account.id);
+    const reloaded = await promptWindowReloadForAccount(account);
     this.view.refresh();
-    await promptWindowReloadForAccount(account);
+    if (!reloadNeeded) {
+      void vscode.window.showInformationMessage(`Switched to ${account.email}.`);
+    }
+    return { status: "switched", account, reloadNeeded, reloaded };
   }
 
   async autoSelectAccount(): Promise<void> {

@@ -118,4 +118,14 @@ describe("resolveOverviewAccount", () => {
 
     expect(resolveOverviewAccount([current, active])?.id).toBe("active");
   });
+
+  it("prefers the queued switch target so the overview can offer reload", () => {
+    const active = account("active", { isActive: true, isCurrentWindowAccount: true });
+    const queued = {
+      ...account("queued", { isActive: false, isCurrentWindowAccount: false }),
+      switchQueued: true
+    };
+
+    expect(resolveOverviewAccount([active, queued])?.id).toBe("queued");
+  });
 });

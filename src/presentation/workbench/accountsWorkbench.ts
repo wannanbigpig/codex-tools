@@ -31,7 +31,7 @@ export class AccountsWorkbench {
     this.refreshCoordinator = new WorkbenchRefreshCoordinator(context, this.repo, this.statusBar);
     this.codexSessionResume = new CodexSessionResumeManager(context);
     this.encryptedSync = new EncryptedSyncManager(context, this.repo);
-    this.webDashboard = new WebDashboardServer(context, this.repo);
+    this.webDashboard = new WebDashboardServer(context, this.repo, this.encryptedSync);
     this.repo.setAccountSwitchCoordinator(this.encryptedSync);
   }
 
@@ -81,13 +81,13 @@ export class AccountsWorkbench {
         }
       }),
       this.webDashboard,
-      vscode.commands.registerCommand("codexAccounts.openWebDashboard", () =>
-        runRegisteredCommand("Open web dashboard", () => this.webDashboard.openInBrowser(), "dashboard:open-web")
+      vscode.commands.registerCommand("codexAccounts.openWebDashboard", (options?: { pathname?: string }) =>
+        runRegisteredCommand("Open web dashboard", () => this.webDashboard.openInBrowser(options?.pathname), "dashboard:open-web")
       ),
-      vscode.commands.registerCommand("codexAccounts.setWebDashboardPassword", () =>
+      vscode.commands.registerCommand("codexAccounts.setWebDashboardPassword", (password?: string) =>
         runRegisteredCommand(
           "Set web dashboard password",
-          (password?: string) => password === undefined ? this.webDashboard.promptSetPassword() : this.webDashboard.setPasswordValue(password),
+          () => password === undefined ? this.webDashboard.promptSetPassword() : this.webDashboard.setPasswordValue(password),
           "dashboard:set-web-password"
         )
       ),

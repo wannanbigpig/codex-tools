@@ -49,6 +49,44 @@ describe("encrypted account sync", () => {
     manager.dispose();
   });
 
+  it("queues background sync after a local account removal so its tombstone is published", async () => {
+    const state = new Map<string, unknown>();
+    const updates: Array<[string, unknown]> = [];
+    const context = {
+      subscriptions: [] as vscode.Disposable[],
+      globalState: {
+        get: <T>(key: string) => state.get(key) as T | undefined,
+        update: vi.fn(async (key: string, value: unknown) => {
+          updates.push([key, value]);
+          state.set(key, value);
+        }),
+        setKeysForSync: vi.fn()
+      },
+      secrets: {
+        get: vi.fn(async (key: string) => (key === "codexAccounts.encryptedSync.deviceId" ? "device-one" : undefined)),
+        store: vi.fn(async () => undefined),
+        delete: vi.fn(async () => undefined)
+      }
+    } as unknown as vscode.ExtensionContext;
+    const manager = new EncryptedSyncManager(context, {} as never);
+    const queue = vi.spyOn(manager, "queueBackgroundSync").mockImplementation(() => undefined);
+
+    manager.onAccountsMutated({ addedAccountIds: [], removedAccountIds: ["removed-account"] });
+
+    await vi.waitFor(() => expect(queue).toHaveBeenCalledWith());
+    expect(state.get("codexAccounts.encryptedSync.localDeletions.v1")).toEqual([
+      expect.objectContaining({ accountId: "removed-account", deviceId: "device-one" })
+    ]);
+    expect(updates).toEqual(
+      expect.arrayContaining([
+        ["codexAccounts.encryptedSync.localDeletions.v1", expect.any(Array)],
+        ["codexAccounts.encryptedSync.localEnablement.v1", expect.any(Array)],
+        ["codexAccounts.encryptedSync.localEnablementPending.v1", ["removed-account"]]
+      ])
+    );
+    manager.dispose();
+  });
+
   it("encrypts and decrypts an authenticated compressed vault without exposing credentials", async () => {
     const payload = createPayload([createEntry("one", 100, "refresh-secret")]);
     payload.leases = [

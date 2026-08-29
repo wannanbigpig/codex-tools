@@ -89,6 +89,12 @@ export function SettingsOverlay(props: {
                 props.onSendSetting("displayLanguage", value);
               }}
             />
+            <div class="settings-block settings-block-wide settings-integration-group">
+              <div class="settings-block-head settings-integration-head">
+                <div class="settings-block-title">{props.lang === "zh" ? "面板与 CLI 会话" : props.lang === "zh-hant" ? "面板與 CLI 工作階段" : "Dashboard & CLI Sessions"}</div>
+                <div class="settings-block-sub">{props.lang === "zh" ? "在一个位置配置浏览器访问、本机 CLI 会话和会话恢复。" : props.lang === "zh-hant" ? "在一個位置設定瀏覽器存取、本機 CLI 工作階段與工作階段恢復。" : "Configure browser access, local CLI sessions, and session resume in one place."}</div>
+              </div>
+              <div class="settings-integration-grid">
             <SettingsToggleBlock
               title={props.lang === "zh" ? "浏览器面板" : props.lang === "zh-hant" ? "瀏覽器面板" : "Web Dashboard"}
               sub={
@@ -145,6 +151,8 @@ export function SettingsOverlay(props: {
                 {props.settings.autoResumeCodexSessions ? sessionResumeCopy.enabled : sessionResumeCopy.disabled}
               </div>
             </SettingsToggleBlock>
+              </div>
+            </div>
             <SettingsToggleBlock
               title={props.copy.codexAppRestartTitle}
               sub={props.copy.codexAppRestartSub}

@@ -35,6 +35,21 @@ describe("dashboard action feedback", () => {
     });
   });
 
+  it("surfaces a cancelled CLI turn as a visible warning", () => {
+    expect(
+      noticeFromActionResult({
+        type: "dashboard:action-result",
+        requestId: "request-stop",
+        action: "sendCodexCliSessionMessage",
+        status: "cancelled",
+        error: "Codex stopped this turn before it completed."
+      })
+    ).toEqual({
+      level: "warning",
+      message: "Codex stopped this turn before it completed."
+    });
+  });
+
   it("does not show failure feedback for completed actions", () => {
     expect(
       noticeFromActionResult({

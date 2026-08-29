@@ -38,6 +38,11 @@ export function resolveCompactIdentityBadge(
     : { kind: "plan", label: planTypeLabel };
 }
 
+/** A foreign claim needs the rescue explanation only while rescue is locked. */
+export function shouldOpenClaimPopover(runningOnOtherDevice: boolean, registryOverrideEnabled: boolean): boolean {
+  return runningOnOtherDevice && !registryOverrideEnabled;
+}
+
 /** Keep transport/provider details out of the compact card while retaining
  * the actionable health state (for example, "Needs Reauth"). */
 export function resolveCardHealthReason(
@@ -134,6 +139,7 @@ export function SavedAccountCard(props: {
   const resetLabel = copy.resetCreditsBtn ?? (zh ? "重置配额" : hant ? "重置配額" : "Reset quota");
   const runningOnOtherDevice = Boolean(account.runningDeviceName && !account.runningOnThisDevice);
   const registryOverrideEnabled = settings.encryptedSyncRegistryOverrideEnabled;
+  const claimIsLocked = shouldOpenClaimPopover(runningOnOtherDevice, registryOverrideEnabled);
   const runningDeviceLabel = runningOnOtherDevice
     ? resolveRunningDeviceLabel(account.runningDeviceName ?? "", props.lang)
     : undefined;
@@ -172,6 +178,13 @@ export function SavedAccountCard(props: {
       window.removeEventListener("scroll", updatePosition, true);
     };
   }, [claimPopoverOpen]);
+  useEffect(() => {
+    // A rescue-enabled foreign claim is warning-only and should never leave
+    // the locked-claim dialog open after the override state changes.
+    if (!claimIsLocked) {
+      setClaimPopoverOpen(false);
+    }
+  }, [claimIsLocked]);
   useEffect(() => {
     if (!actionsOpen) return;
     const closeOutside = (event: PointerEvent): void => {
@@ -249,47 +262,42 @@ export function SavedAccountCard(props: {
     setFlipped(nextFlipped);
   };
   const handleEnablementToggle = (): void => {
-    if (runningOnOtherDevice) {
+    if (claimIsLocked) {
       setClaimPopoverOpen((open) => !open);
       return;
     }
     onAction("toggleAccountEnabled", account.id);
   };
   const claimPopover =
-    runningOnOtherDevice && claimPopoverOpen
+    claimIsLocked && claimPopoverOpen
       ? createPortal(
           <div
             ref={claimPopoverContentRef}
             class="claim-popover claim-popover-portal"
             role="dialog"
-            aria-label={resolveClaimPopoverText(
-              "title",
-              account.runningDeviceName ?? "",
-              props.lang,
-              registryOverrideEnabled
-            )}
+            aria-label={resolveClaimPopoverText("title", account.runningDeviceName ?? "", props.lang)}
             onClick={stopFlip}
             style={{ top: `${claimPopoverPosition.top}px`, right: `${claimPopoverPosition.right}px` }}
           >
             <div class="claim-popover-head">
               <div class="claim-popover-title">
-                {resolveClaimPopoverText("title", account.runningDeviceName ?? "", props.lang, registryOverrideEnabled)}
+                {resolveClaimPopoverText("title", account.runningDeviceName ?? "", props.lang)}
               </div>
               <button
                 class="claim-popover-close"
                 type="button"
-                aria-label={resolveClaimPopoverText("close", "", props.lang, registryOverrideEnabled)}
+                aria-label={resolveClaimPopoverText("close", "", props.lang)}
                 onClick={() => setClaimPopoverOpen(false)}
               >
                 ×
               </button>
             </div>
             <div class="claim-popover-body">
-              {resolveClaimPopoverText("body", account.runningDeviceName ?? "", props.lang, registryOverrideEnabled)}
+              {resolveClaimPopoverText("body", account.runningDeviceName ?? "", props.lang)}
             </div>
             <div class="claim-popover-actions">
               <button
-                class={`claim-popover-action ${registryOverrideEnabled ? "is-danger" : "is-primary"}`}
+                class="claim-popover-action is-primary"
                 type="button"
                 disabled={props.busy}
                 onClick={() => {
@@ -297,12 +305,7 @@ export function SavedAccountCard(props: {
                   onAction("setEncryptedSyncRegistryOverride", undefined, { enabled: !registryOverrideEnabled });
                 }}
               >
-                {resolveClaimPopoverText(
-                  registryOverrideEnabled ? "disableRescue" : "rescue",
-                  "",
-                  props.lang,
-                  registryOverrideEnabled
-                )}
+                {resolveClaimPopoverText("rescue", "", props.lang)}
               </button>
               <button
                 class="claim-popover-action is-secondary"
@@ -313,7 +316,7 @@ export function SavedAccountCard(props: {
                   onAction("syncNow");
                 }}
               >
-                {resolveClaimPopoverText("sync", "", props.lang, registryOverrideEnabled)}
+                {resolveClaimPopoverText("sync", "", props.lang)}
               </button>
             </div>
           </div>,
@@ -339,8 +342,8 @@ export function SavedAccountCard(props: {
           title={enablementToggleLabel}
           aria-label={enablementToggleLabel}
           aria-pressed={account.enabled}
-          aria-haspopup={runningOnOtherDevice ? "dialog" : undefined}
-          aria-expanded={runningOnOtherDevice ? claimPopoverOpen : undefined}
+          aria-haspopup={claimIsLocked ? "dialog" : undefined}
+          aria-expanded={claimIsLocked ? claimPopoverOpen : undefined}
           disabled={props.busy}
           onClick={handleEnablementToggle}
         >
@@ -920,38 +923,28 @@ export function SavedAccountCard(props: {
 }
 
 function resolveClaimPopoverText(
-  key: "title" | "body" | "close" | "rescue" | "disableRescue" | "sync",
+  key: "title" | "body" | "close" | "rescue" | "sync",
   deviceName: string,
-  lang: DashboardState["lang"],
-  overrideEnabled: boolean
+  lang: DashboardState["lang"]
 ): string {
   const values = {
     en: {
-      title: overrideEnabled ? "Rescue override is active" : `Enabled on ${deviceName}`,
-      body: overrideEnabled
-        ? `The claim by ${deviceName} is warning-only on this PC. Disable rescue to enforce the shared registry again.`
-        : "Sync after disabling this account on that PC, or use rescue to unlock it only on this PC.",
-      disableRescue: "Disable rescue",
+      title: `Enabled on ${deviceName}`,
+      body: "Sync after disabling this account on that PC, or use rescue to unlock it only on this PC.",
       close: "Close",
       rescue: "Rescue override",
       sync: "Sync & check"
     },
     zh: {
-      title: overrideEnabled ? "救援覆盖已启用" : `已在 ${deviceName} 启用`,
-      body: overrideEnabled
-        ? `${deviceName} 的占用在本机仅作警告。关闭救援覆盖即可再次强制执行共享注册表。`
-        : "请在该电脑停用账号后同步，或使用救援覆盖仅在本机解锁。",
-      disableRescue: "关闭救援覆盖",
+      title: `已在 ${deviceName} 启用`,
+      body: "请在该电脑停用账号后同步，或使用救援覆盖仅在本机解锁。",
       close: "关闭",
       rescue: "救援覆盖",
       sync: "同步并检查"
     },
     "zh-hant": {
-      title: overrideEnabled ? "救援覆寫已啟用" : `已在 ${deviceName} 啟用`,
-      body: overrideEnabled
-        ? `${deviceName} 的佔用在本機僅作警告。關閉救援覆寫即可再次強制執行共享登錄。`
-        : "請在該電腦停用帳號後同步，或使用救援覆寫僅在本機解鎖。",
-      disableRescue: "關閉救援覆寫",
+      title: `已在 ${deviceName} 啟用`,
+      body: "請在該電腦停用帳號後同步，或使用救援覆寫僅在本機解鎖。",
       close: "關閉",
       rescue: "救援覆寫",
       sync: "同步並檢查"

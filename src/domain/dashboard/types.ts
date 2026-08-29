@@ -498,6 +498,14 @@ export type DashboardActionName =
   | "getDailyUsage"
   | "listCodexCliSessions"
   | "getCodexCliSessionMessages"
+  | "sendCodexCliSessionMessage"
+  | "cancelCodexCliSessionTurn"
+  | "openCodexCliSession"
+  | "renameCodexCliSession"
+  | "forkCodexCliSession"
+  | "archiveCodexCliSession"
+  | "unarchiveCodexCliSession"
+  | "deleteCodexCliSession"
   | "getResetCredits"
   | "consumeResetCredit";
 
@@ -512,6 +520,7 @@ export interface DashboardActionPayload {
   jsonText?: string;
   text?: string;
   url?: string;
+  path?: string;
   filename?: string;
   oauthSessionId?: string;
   callbackUrl?: string;
@@ -527,7 +536,17 @@ export interface DashboardActionPayload {
   enabled?: boolean;
   days?: number;
   sessionId?: string;
+  model?: string;
+  reasoningEffort?: string;
+  sandboxMode?: DashboardCliSandboxMode;
   password?: string;
+  /** Browser-dashboard confirmation supplied by an in-page modal. */
+  confirmed?: boolean;
+  /** Tags collected by the browser dashboard instead of a VS Code input box. */
+  submittedTags?: string[];
+  /** Secret collected by a port-dashboard password modal. Never persisted in dashboard state. */
+  passphrase?: string;
+  passphraseConfirmation?: string;
 }
 
 export interface DashboardCliSessionSummary {
@@ -535,13 +554,59 @@ export interface DashboardCliSessionSummary {
   title: string;
   updatedAt?: string;
   status: "running" | "idle";
+  archived?: boolean;
 }
 
 export interface DashboardCliSessionMessage {
   id: string;
-  role: "user" | "assistant";
+  kind?:
+    | "message"
+    | "reasoning"
+    | "plan"
+    | "command"
+    | "file-change"
+    | "tool-call"
+    | "collaboration"
+    | "web-search"
+    | "image"
+    | "review"
+    | "compaction"
+    | "error";
+  role?: "user" | "assistant";
   text: string;
+  title?: string;
+  subtitle?: string;
+  status?: "inProgress" | "completed" | "failed" | "declined" | "interrupted" | "unknown";
+  command?: string;
+  cwd?: string;
+  output?: string;
+  exitCode?: number;
+  durationMs?: number;
+  arguments?: string;
+  result?: string;
+  changes?: Array<{
+    path: string;
+    kind: string;
+    diff?: string;
+  }>;
   timestamp?: string;
+}
+
+export type DashboardCliSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+
+export interface DashboardCliModelOption {
+  id: string;
+  label: string;
+  description?: string;
+  defaultReasoningEffort?: string;
+  reasoningEfforts: string[];
+}
+
+export interface DashboardCliComposerConfig {
+  models: DashboardCliModelOption[];
+  defaultModel?: string;
+  defaultReasoningEffort?: string;
+  defaultSandboxMode: DashboardCliSandboxMode;
 }
 
 export interface DashboardActionResultPayload {
@@ -561,6 +626,11 @@ export interface DashboardActionResultPayload {
   cliSessions?: DashboardCliSessionSummary[];
   cliSession?: DashboardCliSessionSummary;
   cliSessionMessages?: DashboardCliSessionMessage[];
+  cliComposerConfig?: DashboardCliComposerConfig;
+  /** The active credentials changed and this VS Code window should be reloaded. */
+  reloadRequired?: boolean;
+  /** Account that should be used when presenting an in-dashboard reload confirmation. */
+  reloadAccountId?: string;
 }
 
 export interface DashboardNotice {
@@ -578,7 +648,7 @@ export type DashboardHostMessage =
       requestId: string;
       action: DashboardActionName;
       accountId?: string;
-      status: "completed" | "failed";
+      status: "completed" | "cancelled" | "failed";
       payload?: DashboardActionResultPayload;
       error?: string;
     }

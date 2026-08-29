@@ -245,6 +245,14 @@ export class EncryptedSyncManager implements vscode.Disposable {
         }
         await this.storeLocalEnablement([...enablement.values()], deviceId);
         await this.markEnablementPending([...change.addedAccountIds, ...change.removedAccountIds]);
+        // Publish removal tombstones promptly instead of waiting for the next
+        // startup or an unrelated manual sync; otherwise another PC can
+        // upload its stale copy and resurrect a removed account. Additions
+        // already flow through their explicit OAuth/import sync paths, so do
+        // not schedule a duplicate background sync for them here.
+        if (change.removedAccountIds.length > 0) {
+          this.queueBackgroundSync();
+        }
       })
       .catch((error) => {
         console.warn("[codexAccounts] could not record encrypted-sync mutation:", error);
@@ -330,7 +338,7 @@ export class EncryptedSyncManager implements vscode.Disposable {
     this.queueBackgroundSync(ENABLEMENT_SYNC_CONSOLIDATION_DELAY_MS);
   }
 
-  async setRegistryOverrideEnabled(enabled: boolean): Promise<boolean> {
+  async setRegistryOverrideEnabled(enabled: boolean, options?: { passphrase?: string }): Promise<boolean> {
     if (enabled === encryptedSyncRegistryOverrideEnabled) {
       void vscode.window.showInformationMessage(
         enabled ? "Rescue override is already enabled on this PC." : "Rescue override is already off."
@@ -347,7 +355,8 @@ export class EncryptedSyncManager implements vscode.Disposable {
         void vscode.window.showErrorMessage("Set the encrypted sync passphrase before enabling rescue override.");
         return false;
       }
-      const entered = await this.promptForPassphrase("Enter the encrypted sync passphrase to enable rescue override");
+      const entered = options?.passphrase ??
+        (await this.promptForPassphrase("Enter the encrypted sync passphrase to enable rescue override"));
       if (!entered) {
         void vscode.window.showWarningMessage(
           "Rescue override was not enabled because password verification was cancelled."
@@ -390,13 +399,14 @@ export class EncryptedSyncManager implements vscode.Disposable {
     return true;
   }
 
-  async configure(): Promise<boolean> {
+  async configure(options?: { passphrase?: string; confirmation?: string }): Promise<boolean> {
     const rawRemote = this.context.globalState.get<string>(SYNC_KEY);
-    const passphrase = await this.promptForPassphrase(
-      rawRemote
-        ? "Enter the passphrase used by the encrypted sync vault"
-        : "Create a passphrase for encrypted account sync"
-    );
+    const passphrase = options?.passphrase ??
+      (await this.promptForPassphrase(
+        rawRemote
+          ? "Enter the passphrase used by the encrypted sync vault"
+          : "Create a passphrase for encrypted account sync"
+      ));
     if (!passphrase) {
       return false;
     }
@@ -408,6 +418,9 @@ export class EncryptedSyncManager implements vscode.Disposable {
         this.lastRemotePayload = verified;
         this.lastRemotePassphraseHash = crypto.createHash("sha256").update(passphrase, "utf8").digest("base64");
       } catch {
+        if (options?.passphrase !== undefined) {
+          return false;
+        }
         const choice = await vscode.window.showWarningMessage(
           "That passphrase cannot decrypt the existing synchronized vault.",
           { modal: true },
@@ -426,7 +439,8 @@ export class EncryptedSyncManager implements vscode.Disposable {
         await this.context.globalState.update(SYNC_KEY, undefined);
       }
     } else {
-      const confirmation = await this.promptForPassphrase("Confirm the encrypted sync passphrase");
+      const confirmation = options?.confirmation ??
+        (await this.promptForPassphrase("Confirm the encrypted sync passphrase"));
       if (confirmation === undefined || confirmation !== passphrase) {
         void vscode.window.showErrorMessage("The sync passphrases did not match.");
         return false;

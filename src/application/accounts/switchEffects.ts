@@ -82,11 +82,28 @@ export async function promptWindowReloadForAccount(
 
 export async function autoReloadWindowForAccount(accountId?: string): Promise<boolean> {
   if (!needsWindowReloadForAccount(accountId)) {
+    clearQueuedAccountSwitch();
     return false;
   }
 
+  clearQueuedAccountSwitch();
   await reloadExtensionHostWithWindowFallback();
   return true;
+}
+
+/** Record a browser-dashboard switch that the current window has not reloaded for yet. */
+export function deferWindowReloadForAccount(accountId: string): boolean {
+  if (!needsWindowReloadForAccount(accountId)) {
+    clearQueuedAccountSwitch();
+    return false;
+  }
+  const currentWindowAccountId = getCurrentWindowRuntimeAccountId();
+  if (currentWindowAccountId && currentWindowAccountId !== accountId) {
+    queueAccountSwitch(accountId, currentWindowAccountId);
+    return true;
+  }
+  clearQueuedAccountSwitch();
+  return false;
 }
 
 async function reloadExtensionHostWithWindowFallback(): Promise<void> {

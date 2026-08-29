@@ -241,7 +241,8 @@ class DashboardPanelController {
           publishState: async (force = false) => this.publishState(force),
           oauth: this.oauth,
           announcements: this.announcements,
-          getAnnouncementOptions: () => this.getAnnouncementOptions()
+          getAnnouncementOptions: () => this.getAnnouncementOptions(),
+          hostKind: "webview"
         },
         message
       )

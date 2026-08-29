@@ -82,6 +82,14 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | "ti
   ]);
 }
 
+function createContext(dailyUsageCache: unknown = []) {
+  return {
+    globalState: {
+      get: vi.fn((key: string) => (key === "codexAccounts.dashboardDailyUsageCache.v1" ? dailyUsageCache : undefined))
+    }
+  } as never;
+}
+
 describe("publishDashboardSnapshot", () => {
   it("publishes the current snapshot without waiting for reset credits backfill", async () => {
     const state = createState();
@@ -101,6 +109,7 @@ describe("publishDashboardSnapshot", () => {
 
     const result = await withTimeout(
       publishDashboardSnapshot({
+        context: createContext(),
         repo: {} as never,
         settingsStore: {} as never,
         logoUri: "logo",
@@ -116,7 +125,7 @@ describe("publishDashboardSnapshot", () => {
     expect(setPanelTitle).toHaveBeenCalledWith("Quota Summary");
     expect(postMessage).toHaveBeenCalledWith({
       type: "dashboard:snapshot",
-      state
+      state: { ...state, dailyUsageCache: [] }
     });
     expect(schedulePublishState).not.toHaveBeenCalled();
 
@@ -134,6 +143,7 @@ describe("publishDashboardSnapshot", () => {
     const schedulePublishState = vi.fn();
 
     await publishDashboardSnapshot({
+      context: createContext(),
       repo: {} as never,
       settingsStore: {} as never,
       logoUri: "logo",
@@ -146,5 +156,35 @@ describe("publishDashboardSnapshot", () => {
     await Promise.resolve();
 
     expect(schedulePublishState).toHaveBeenCalledTimes(1);
+  });
+
+  it("hydrates persisted daily usage into the published snapshot", async () => {
+    const state = createState();
+    const dailyUsageCache = [
+      {
+        accountId: "account-1",
+        fetchedAt: 123,
+        usage: { days: 1, points: [{ date: "2026-08-28", totalTokens: 42 }] }
+      }
+    ];
+    buildDashboardStateMock.mockResolvedValue(state);
+    backfillMissingResetCreditExpiriesMock.mockResolvedValue(false);
+    const postMessage = vi.fn(async () => true);
+
+    await publishDashboardSnapshot({
+      context: createContext(dailyUsageCache),
+      repo: {} as never,
+      settingsStore: {} as never,
+      logoUri: "logo",
+      announcementsState: state.announcements,
+      setPanelTitle: vi.fn(),
+      postMessage,
+      schedulePublishState: vi.fn()
+    });
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "dashboard:snapshot",
+      state: { ...state, dailyUsageCache }
+    });
   });
 });

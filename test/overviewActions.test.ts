@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { describe, expect, it } from "vitest";
 import {
+  resolveOverviewContextAction,
   resolveOverviewRefreshMode,
   resolveOverviewPopoverPosition,
   resolveOverviewToolbarActionCount,
@@ -9,6 +10,28 @@ import {
 } from "../webview-src/dashboard/overviewSection";
 
 describe("overview actions", () => {
+  it("opens a picker from Switch and exposes Reload for a queued target", () => {
+    const overview = readFileSync("webview-src/dashboard/overviewSection.tsx", "utf8");
+    const main = readFileSync("webview-src/dashboard/main.tsx", "utf8");
+
+    expect(overview).toContain("props.onSwitchAccount();");
+    expect(overview).not.toContain("props.onSwitchAccount(switchTarget.id)");
+    expect(main).toContain('sendAction("switch");');
+    expect(main).toContain("openBrowserSwitchPicker()");
+    expect(
+      resolveOverviewContextAction(
+        {
+          isActive: false,
+          isCurrentWindowAccount: false,
+          switchQueued: true,
+          runningDeviceName: undefined,
+          runningOnThisDevice: undefined
+        },
+        false
+      )
+    ).toBe("reload");
+  });
+
   it("uses quota refresh before encrypted sync is enabled", () => {
     expect(resolveOverviewRefreshMode(false)).toBe("quota");
   });
@@ -41,6 +64,15 @@ describe("overview actions", () => {
     expect(source).toContain('class="claim-popover claim-popover-portal overview-more-menu"');
     expect(source).toContain("morePopoverContentRef.current?.contains(target)");
     expect(source).toMatch(/overview-more-menu[\s\S]*document\.body/);
+  });
+
+  it("keeps Lock and Unlock available in the More menu alongside CLI Sessions", () => {
+    const source = readFileSync("webview-src/dashboard/overviewSection.tsx", "utf8");
+
+    expect(source).toContain('resolveOverviewMenuLabel(account.autoSwitchLockedUntil ? "unlock" : "lock"');
+    expect(source).toContain("openLockDialog(event.currentTarget)");
+    expect(source).toContain("props.onSetAutoSwitchLock(0)");
+    expect(source).toContain("props.onOpenCliSessions!");
   });
 
   it("keeps all four account actions in one icon-only row on mobile", () => {

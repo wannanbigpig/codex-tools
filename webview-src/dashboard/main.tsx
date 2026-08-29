@@ -6,6 +6,7 @@ import type {
   DashboardAccountViewModel,
   DashboardActionName,
   DashboardActionPayload,
+  DashboardCliComposerConfig,
   DashboardCliSessionMessage,
   DashboardCliSessionSummary,
   DashboardNotice,
@@ -30,6 +31,7 @@ import {
 import { useDashboardActions, useDashboardHostSync, useDashboardModals } from "./hooks";
 import {
   BellIcon,
+  CodexSessionsIcon,
   DropdownChevronIcon,
   EyeIcon,
   EyeOffIcon,
@@ -42,7 +44,7 @@ import {
   AboutModal,
   AccountInfoModal,
   AddAccountModal,
-  CliSessionsModal,
+  CliSessionsPage,
   WebDashboardPasswordModal,
   ConfirmCancelOauthModal,
   SettingsOverlay,
@@ -52,6 +54,9 @@ import { SavedAccountCard } from "./savedAccountCard";
 import { createInitialState, reducer } from "./state";
 import { resolveDashboardThemeFromMedia } from "./theme";
 import { scheduleDashboardToastDismiss } from "./toast";
+import { BrowserActionModal, type BrowserActionRequest } from "./browserActionModal";
+import { canRunAccountOnThisPc } from "./accountRunPolicy";
+import type { CliSessionFeedback } from "./cliSessionsModal";
 
 const GITHUB_PROJECT_URL = "https://github.com/wannanbigpig/codex-tools";
 const ACCOUNT_SORT_STORAGE_KEY = "codexAccounts.dashboardAccountSort.v3";
@@ -89,6 +94,20 @@ const DEFAULT_UI_PREFERENCES: UiPreferences = {
   metricPriority: "hourly"
 };
 
+function isCliSessionsPath(pathname: string): boolean {
+  return pathname === "/sessions" || /^\/session\/[0-9a-f-]{36}$/i.test(pathname);
+}
+
+function getCliSessionIdFromPath(pathname: string): string | undefined {
+  const match = pathname.match(/^\/session\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+  return match?.[1];
+}
+
+function navigateDashboardPath(pathname: string, setPath: (value: string) => void): void {
+  if (window.location.pathname !== pathname) window.history.pushState({}, "", pathname);
+  setPath(pathname);
+}
+
 function isAccountSort(value: string | null): value is AccountSort {
   return (
     value === "auto-queue" ||
@@ -125,13 +144,16 @@ function App() {
   const [shareExportCount, setShareExportCount] = useState(0);
   const [usageHistory, setUsageHistory] = useState<DashboardUsageSample[]>(loadUsageHistory);
   const [accountInfoAccountId, setAccountInfoAccountId] = useState<string>();
-  const [cliSessionsOpen, setCliSessionsOpen] = useState(false);
+  const [browserPath, setBrowserPath] = useState(() => isBrowserDashboard ? window.location.pathname : "/");
   const [webPasswordModalOpen, setWebPasswordModalOpen] = useState(false);
+  const [browserActionRequest, setBrowserActionRequest] = useState<BrowserActionRequest>();
   const [cliSessions, setCliSessions] = useState<DashboardCliSessionSummary[]>([]);
   const [cliSessionMessages, setCliSessionMessages] = useState<DashboardCliSessionMessage[]>([]);
   const [selectedCliSession, setSelectedCliSession] = useState<DashboardCliSessionSummary>();
   const [cliSessionsError, setCliSessionsError] = useState<string>();
   const [cliSessionMessagesError, setCliSessionMessagesError] = useState<string>();
+  const [cliComposerConfig, setCliComposerConfig] = useState<DashboardCliComposerConfig>();
+  const [cliSessionFeedback, setCliSessionFeedback] = useState<CliSessionFeedback>();
   const [dailyUsageByAccount, setDailyUsageByAccount] = useState<Record<string, CodexDailyUsageBreakdown>>({});
   const [dailyUsageErrorByAccount, setDailyUsageErrorByAccount] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<DashboardNotice>();
@@ -154,6 +176,26 @@ function App() {
   useDashboardHostSync({
     handleHostMessage: (message) => {
       modals.handleHostMessage(message);
+      if (
+        isBrowserDashboard &&
+        message.type === "dashboard:action-result" &&
+        (message.action === "switch" || message.action === "importCurrent") &&
+        message.status === "completed" &&
+        message.payload?.reloadRequired &&
+        message.payload.reloadAccountId
+      ) {
+        const switchedAccount = state.snapshot?.accounts.find(
+          (account) => account.id === message.payload?.reloadAccountId
+        );
+        setBrowserActionRequest({
+          kind: "confirm",
+          action: "reloadPrompt",
+          accountId: message.payload.reloadAccountId,
+          title: "Reload VS Code",
+          message: `${message.action === "switch" ? "The account was switched" : "The current account was imported"}${switchedAccount ? ` (${switchedAccount.email})` : ""}. Reload the VS Code extension host now to apply it to this window?`,
+          confirmLabel: "Reload"
+        });
+      }
       if (message.type === "dashboard:action-result" && message.action === "getDailyUsage" && message.accountId) {
         if (message.status === "completed" && message.payload?.dailyUsage) {
           setDailyUsageByAccount((current) => ({ ...current, [message.accountId!]: message.payload!.dailyUsage! }));
@@ -171,8 +213,28 @@ function App() {
       }
       if (message.type === "dashboard:action-result" && message.action === "listCodexCliSessions") {
         if (message.status === "completed") {
-          setCliSessions(message.payload?.cliSessions ?? []);
+          const sessions = message.payload?.cliSessions ?? [];
+          setCliSessions(sessions);
+          setCliComposerConfig(message.payload?.cliComposerConfig);
           setCliSessionsError(undefined);
+          const routeId = getCliSessionIdFromPath(window.location.pathname);
+          if (routeId) {
+            const routeSession = sessions.find((session) => session.id === routeId);
+            if (routeSession?.archived) {
+              navigateDashboardPath("/sessions", setBrowserPath);
+              setSelectedCliSession(undefined);
+              setCliSessionMessages([]);
+              setCliSessionFeedback({ key: Date.now(), level: "warning", message: "Archived sessions cannot be opened. Restore the session from the Archived list first." });
+            } else if (routeSession) {
+              setSelectedCliSession(routeSession);
+              sendAction("getCodexCliSessionMessages", undefined, { sessionId: routeId });
+            } else if (selectedCliSession?.id === routeId) {
+              // A newly forked session can take a moment to appear in Codex's local index.
+            } else {
+              setCliSessionMessagesError(undefined);
+              sendAction("getCodexCliSessionMessages", undefined, { sessionId: routeId });
+            }
+          }
         } else {
           setCliSessionsError(message.error ?? "CLI sessions could not be loaded.");
         }
@@ -183,7 +245,61 @@ function App() {
           setSelectedCliSession(message.payload?.cliSession ?? selectedCliSession);
           setCliSessionMessagesError(undefined);
         } else {
-          setCliSessionMessagesError(message.error ?? "Session messages could not be loaded.");
+          const error = message.error ?? "Session messages could not be loaded.";
+          if (/archived sessions cannot be opened/i.test(error)) {
+            navigateDashboardPath("/sessions", setBrowserPath);
+            setSelectedCliSession(undefined);
+            setCliSessionMessages([]);
+            setCliSessionMessagesError(undefined);
+            setCliSessionFeedback({ key: Date.now(), level: "warning", message: "Archived sessions cannot be opened. Restore the session from the Archived list first." });
+          } else {
+            setCliSessionMessagesError(error);
+          }
+        }
+      }
+      if (message.type === "dashboard:action-result" && message.action === "sendCodexCliSessionMessage") {
+        if (message.status === "completed") {
+          setCliSessions(message.payload?.cliSessions ?? cliSessions);
+          setCliSessionMessages(message.payload?.cliSessionMessages ?? []);
+          setSelectedCliSession(message.payload?.cliSession ?? selectedCliSession);
+          setCliSessionMessagesError(undefined);
+          setCliSessionFeedback({ key: Date.now(), level: "info", message: "Codex completed the turn." });
+        } else {
+          const level = message.status === "cancelled" ? "warning" : "error";
+          setCliSessionFeedback({ key: Date.now(), level, message: message.error ?? "Codex could not complete the turn." });
+          if (selectedCliSession) sendAction("getCodexCliSessionMessages", undefined, { sessionId: selectedCliSession.id });
+        }
+      }
+      if (message.type === "dashboard:action-result" && message.action === "cancelCodexCliSessionTurn") {
+        setCliSessionFeedback({
+          key: Date.now(),
+          level: message.status === "completed" ? "warning" : "error",
+          message: message.status === "completed" ? "Stopping the active Codex turn…" : message.error ?? "The turn could not be stopped."
+        });
+      }
+      if (message.type === "dashboard:action-result" && ["openCodexCliSession", "renameCodexCliSession", "forkCodexCliSession", "archiveCodexCliSession", "unarchiveCodexCliSession", "deleteCodexCliSession"].includes(message.action)) {
+        setCliSessionFeedback({
+          key: Date.now(),
+          level: message.status === "completed" ? "info" : "error",
+          message: message.status === "completed"
+            ? message.payload?.notice?.message ?? "Session action completed."
+            : message.error ?? "The session action failed."
+        });
+        if (message.status === "completed" && message.payload?.cliSessions) setCliSessions(message.payload.cliSessions);
+        if (message.status === "completed" && message.action === "renameCodexCliSession" && message.payload?.cliSession) setSelectedCliSession(message.payload.cliSession);
+        if (message.status === "completed" && message.action === "forkCodexCliSession" && message.payload?.cliSession) {
+          setSelectedCliSession(message.payload.cliSession);
+          setCliSessionMessages([]);
+          navigateDashboardPath(`/session/${message.payload.cliSession.id}`, setBrowserPath);
+        }
+        if (message.status === "completed" && (message.action === "archiveCodexCliSession" || message.action === "deleteCodexCliSession")) {
+          navigateDashboardPath("/sessions", setBrowserPath);
+          setSelectedCliSession(undefined);
+          setCliSessionMessages([]);
+        }
+        if (message.status === "completed" && message.action === "unarchiveCodexCliSession" && selectedCliSession) {
+          const restored = message.payload?.cliSessions?.find((session) => session.id === selectedCliSession.id);
+          if (restored) setSelectedCliSession(restored);
         }
       }
     },
@@ -197,6 +313,41 @@ function App() {
       return next;
     });
   }, [snapshot?.dailyUsageCache]);
+
+  useEffect(() => {
+    if (!isBrowserDashboard) return;
+    const onPopState = () => {
+      const path = window.location.pathname;
+      setBrowserPath(path);
+      const sessionId = getCliSessionIdFromPath(path);
+      if (!sessionId) {
+        setSelectedCliSession(undefined);
+        setCliSessionMessages([]);
+      }
+      if (path === "/sessions" || sessionId) sendAction("listCodexCliSessions");
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [isBrowserDashboard]);
+
+  useEffect(() => {
+    if (!snapshot?.settings.cliIntegrationEnabled) return;
+    sendAction("listCodexCliSessions");
+  }, [snapshot?.settings.cliIntegrationEnabled]);
+
+  const cliSessionPollingBusy = isActionPending("listCodexCliSessions") || isActionPending("getCodexCliSessionMessages");
+  useEffect(() => {
+    if (
+      !isBrowserDashboard ||
+      !snapshot?.settings.cliIntegrationEnabled ||
+      !isCliSessionsPath(browserPath) ||
+      cliSessionPollingBusy
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => sendAction("listCodexCliSessions"), 3_000);
+    return () => window.clearTimeout(timer);
+  }, [browserPath, cliSessionPollingBusy, isBrowserDashboard, snapshot?.settings.cliIntegrationEnabled]);
 
   useEffect(() => {
     const terminalNotice = snapshot?.terminalNotice;
@@ -345,7 +496,11 @@ function App() {
     ? snapshot.accounts.find((account) => account.id === accountInfoAccountId)
     : undefined;
   const openCliSessions = (): void => {
-    setCliSessionsOpen(true);
+    if (!isBrowserDashboard) {
+      sendAction("openWebDashboard", undefined, { path: "/sessions" });
+      return;
+    }
+    navigateDashboardPath("/sessions", setBrowserPath);
     setSelectedCliSession(undefined);
     setCliSessionMessages([]);
     setCliSessionsError(undefined);
@@ -353,6 +508,11 @@ function App() {
     sendAction("listCodexCliSessions");
   };
   const selectCliSession = (session: DashboardCliSessionSummary): void => {
+    if (session.archived) {
+      setCliSessionFeedback({ key: Date.now(), level: "warning", message: "Archived sessions cannot be opened. Restore this session first." });
+      return;
+    }
+    navigateDashboardPath(`/session/${session.id}`, setBrowserPath);
     setSelectedCliSession(session);
     setCliSessionMessages([]);
     setCliSessionMessagesError(undefined);
@@ -523,6 +683,43 @@ function App() {
       modals.openReauthorizeModal(accountId);
       return;
     }
+    if (isBrowserDashboard && action === "remove" && accountId) {
+      const account = snapshot.accounts.find((candidate) => candidate.id === accountId);
+      setBrowserActionRequest({
+        kind: "confirm",
+        action,
+        accountId,
+        title: "Remove account",
+        message: `Remove ${account?.email ?? "this account"} from Codex Accounts Manager?`,
+        confirmLabel: "Remove",
+        danger: true
+      });
+      return;
+    }
+    if (isBrowserDashboard && action === "consumeResetCredit" && accountId) {
+      const account = snapshot.accounts.find((candidate) => candidate.id === accountId);
+      const available = account?.resetCreditsAvailable ?? 0;
+      setBrowserActionRequest({
+        kind: "confirm",
+        action,
+        accountId,
+        title: "Reset your usage?",
+        message: `Reset the rate limit for ${account?.email ?? "this account"}? ${available} reset${available === 1 ? "" : "s"} available.`,
+        confirmLabel: "Reset Rate Limit"
+      });
+      return;
+    }
+    if (isBrowserDashboard && action === "reloadPrompt" && accountId) {
+      setBrowserActionRequest({
+        kind: "confirm",
+        action,
+        accountId,
+        title: "Reload VS Code",
+        message: "Reload the VS Code extension host so this window uses the active account?",
+        confirmLabel: "Reload"
+      });
+      return;
+    }
     sendAction(action, accountId, payload);
   };
 
@@ -532,6 +729,17 @@ function App() {
   };
 
   const handleEditAccountTags = (account: DashboardAccountViewModel): void => {
+    if (isBrowserDashboard) {
+      setBrowserActionRequest({
+        kind: "tags",
+        accountId: account.id,
+        accountIds: [account.id],
+        mode: "set",
+        initialTags: account.tags,
+        title: `Edit tags: ${account.email}`
+      });
+      return;
+    }
     sendAction("updateTags", account.id, {
       mode: "set"
     });
@@ -541,9 +749,114 @@ function App() {
     if (!selectedCount) {
       return;
     }
+    if (isBrowserDashboard) {
+      setBrowserActionRequest({
+        kind: "tags",
+        accountIds: state.selectedAccountIds,
+        mode,
+        initialTags: [],
+        title: mode === "add" ? "Add tags" : "Remove tags"
+      });
+      return;
+    }
     sendAction("updateTags", undefined, {
       accountIds: state.selectedAccountIds,
       mode
+    });
+  };
+
+  const openBrowserSwitchPicker = (): void => {
+    const accountIds = snapshot.accounts
+      .filter(
+        (account) =>
+          !account.isActive &&
+          !account.switchQueued &&
+          hasDashboardAutoQueueCapability(account) &&
+          canRunAccountOnThisPc(
+            account,
+            hasGlobalPendingAction,
+            snapshot.settings.encryptedSyncRegistryOverrideEnabled
+          )
+      )
+      .sort(compareDashboardAutoQueueAccounts)
+      .map((account) => account.id);
+    setBrowserActionRequest({ kind: "switch", accountIds });
+  };
+
+  const confirmBrowserAction = (request: BrowserActionRequest, submittedTags?: string[]): void => {
+    setBrowserActionRequest(undefined);
+    if (request.kind === "switch") {
+      const accountId = request.accountIds[0];
+      if (accountId) {
+        sendAction("switch", accountId);
+      }
+      return;
+    }
+    if (request.kind === "tags") {
+      sendAction("updateTags", request.accountId, {
+        accountIds: request.accountIds,
+        mode: request.mode,
+        submittedTags: submittedTags ?? []
+      });
+      return;
+    }
+    if (request.kind === "passphrase") {
+      sendAction(request.action, undefined, {
+        enabled: request.enabled,
+        passphrase: submittedTags?.[0],
+        passphraseConfirmation: submittedTags?.[1]
+      });
+      return;
+    }
+    sendAction(request.action, request.accountId, {
+      accountIds: request.accountIds,
+      confirmed: true
+    });
+    if (request.action === "reloadPrompt") {
+      showNotice({ level: "info", message: "Reload requested. Waiting for VS Code to restart the extension host…" });
+    }
+  };
+
+  const cancelBrowserAction = (request: BrowserActionRequest): void => {
+    setBrowserActionRequest(undefined);
+    const message = request.kind === "switch"
+      ? "Account switch cancelled."
+      : request.kind === "tags"
+        ? "Tag update cancelled."
+        : request.kind === "passphrase"
+          ? `${request.title} cancelled.`
+        : request.action === "reloadPrompt"
+          ? "Reload postponed. Use Reload when you are ready."
+          : `${request.title} cancelled.`;
+    showNotice({ level: "info", message });
+  };
+
+  const handleConfigureEncryptedSync = (): void => {
+    if (!isBrowserDashboard) {
+      sendAction("configureEncryptedSync");
+      return;
+    }
+    setBrowserActionRequest({
+      kind: "passphrase",
+      action: "configureEncryptedSync",
+      title: "Configure encrypted sync",
+      message: "Create or enter the passphrase for the synchronized account vault.",
+      confirmPassphrase: true
+    });
+  };
+
+  const handleRegistryOverride = (enabled: boolean): void => {
+    if (!isBrowserDashboard || !enabled) {
+      sendAction("setEncryptedSyncRegistryOverride", undefined, { enabled });
+      return;
+    }
+    setBrowserActionRequest({
+      kind: "passphrase",
+      action: "setEncryptedSyncRegistryOverride",
+      enabled,
+      title: "Enable rescue override",
+      message: "Enter the encrypted sync passphrase to enable rescue override on this PC.",
+      confirmPassphrase: false
     });
   };
 
@@ -628,16 +941,21 @@ function App() {
                   </span>
                 ) : null}
               </button>
-              {isBrowserDashboard && snapshot.settings.cliIntegrationEnabled === true ? (
+              {snapshot.settings.cliIntegrationEnabled === true ? (
                 <button
                   id="cliSessionsButton"
-                  class="settings-btn action-btn icon-only"
+                  class={`settings-btn action-btn icon-only cli-sessions-entry ${cliSessions.some((session) => session.status === "running" && !session.archived) ? "has-running" : ""}`}
                   type="button"
                   title="CLI Sessions"
                   aria-label="CLI Sessions"
                   onClick={openCliSessions}
                 >
-                  <span class="button-face"><span class="button-icon">◉</span></span>
+                  <span class="button-face"><span class="button-icon"><CodexSessionsIcon /></span></span>
+                  {cliSessions.filter((session) => session.status === "running" && !session.archived).length > 0 ? (
+                    <span class="cli-running-count" aria-label={`${cliSessions.filter((session) => session.status === "running" && !session.archived).length} running sessions`}>
+                      {Math.min(99, cliSessions.filter((session) => session.status === "running" && !session.archived).length)}
+                    </span>
+                  ) : null}
                 </button>
               ) : null}
               <button
@@ -736,26 +1054,34 @@ function App() {
             onSetAutoSwitchLock={handleAutoSwitchLock}
             onAddAccount={modals.openAddAccountModal}
             onRefreshAll={() => sendAction("refreshAll")}
-            onConfigureSync={() => sendAction("configureEncryptedSync")}
+            onConfigureSync={handleConfigureEncryptedSync}
             onSyncNow={() => sendAction("syncNow")}
             syncPending={syncPending}
-            registryOverridePending={isActionPending("setEncryptedSyncRegistryOverride")}
-            onSetRegistryOverride={(enabled) =>
-              sendAction("setEncryptedSyncRegistryOverride", undefined, { enabled })
+            switchPending={
+              isActionPending("switch") || snapshot.accounts.some((account) => isActionPending("switch", account.id))
             }
+            reloadPending={Boolean(
+              overviewAccount && isActionPending("reloadPrompt", overviewAccount.id)
+            )}
+            registryOverridePending={isActionPending("setEncryptedSyncRegistryOverride")}
+            onSetRegistryOverride={handleRegistryOverride}
             onConsumeResetCredit={() => {
-              if (overviewAccount) sendAction("consumeResetCredit", overviewAccount.id);
+              if (overviewAccount) handleAccountAction("consumeResetCredit", overviewAccount.id);
             }}
-            onSwitchAccount={(accountId) => {
-              if (accountId) sendAction("switch", accountId);
+            onSwitchAccount={() => {
+              if (isBrowserDashboard) {
+                openBrowserSwitchPicker();
+              } else {
+                sendAction("switch");
+              }
             }}
             onReloadAccount={() => {
-              if (overviewAccount) sendAction("reloadPrompt", overviewAccount.id);
+              if (overviewAccount) handleAccountAction("reloadPrompt", overviewAccount.id);
             }}
             onRefreshQuota={() => {
               if (overviewAccount) sendAction("refresh", overviewAccount.id);
             }}
-            showCliSessions={isBrowserDashboard && snapshot.settings.cliIntegrationEnabled === true}
+            showCliSessions={snapshot.settings.cliIntegrationEnabled === true}
             onOpenCliSessions={openCliSessions}
           />
         </section>
@@ -824,7 +1150,21 @@ function App() {
                   tagsPending={batchTagsPending}
                   onRefresh={() => sendAction("batchRefresh", undefined, { accountIds: state.selectedAccountIds })}
                   onResync={() => sendAction("batchResyncProfile", undefined, { accountIds: state.selectedAccountIds })}
-                  onRemove={() => sendAction("batchRemove", undefined, { accountIds: state.selectedAccountIds })}
+                  onRemove={() => {
+                    if (isBrowserDashboard) {
+                      setBrowserActionRequest({
+                        kind: "confirm",
+                        action: "batchRemove",
+                        accountIds: state.selectedAccountIds,
+                        title: "Remove selected accounts",
+                        message: `Remove ${selectedCount} selected account${selectedCount === 1 ? "" : "s"}?`,
+                        confirmLabel: "Remove",
+                        danger: true
+                      });
+                    } else {
+                      sendAction("batchRemove", undefined, { accountIds: state.selectedAccountIds });
+                    }
+                  }}
                   onShare={handleShareTokens}
                   onAddTags={() => handleBatchTagMutation("add")}
                   onRemoveTags={() => handleBatchTagMutation("remove")}
@@ -990,9 +1330,9 @@ function App() {
         onOpenNetworkLogs={() => sendAction("openNetworkLogs")}
         onExportBackup={handleExportBackup}
         onImportBackup={modals.openImportModal}
-        onConfigureSync={() => sendAction("configureEncryptedSync")}
+        onConfigureSync={handleConfigureEncryptedSync}
         onSyncNow={() => sendAction("syncNow")}
-        onSetRegistryOverride={(enabled) => sendAction("setEncryptedSyncRegistryOverride", undefined, { enabled })}
+        onSetRegistryOverride={handleRegistryOverride}
         registryOverridePending={isActionPending("setEncryptedSyncRegistryOverride")}
         onSetWebDashboardPassword={() => {
           if (isBrowserDashboard) setWebPasswordModalOpen(true);
@@ -1037,21 +1377,64 @@ function App() {
       />
 
       {isBrowserDashboard ? (
-        <CliSessionsModal
-          open={cliSessionsOpen}
+        <BrowserActionModal
+          request={browserActionRequest}
+          accounts={snapshot.accounts}
           lang={snapshot.lang}
           closeLabel={snapshot.copy.closeModal}
+          onCancel={cancelBrowserAction}
+          onConfirm={confirmBrowserAction}
+        />
+      ) : null}
+
+      {isBrowserDashboard && isCliSessionsPath(browserPath) ? createPortal(
+        <CliSessionsPage
           sessions={cliSessions}
           selectedSession={selectedCliSession}
           messages={cliSessionMessages}
+          composerConfig={cliComposerConfig}
           loading={isActionPending("listCodexCliSessions")}
           messagesLoading={isActionPending("getCodexCliSessionMessages")}
+          sending={isActionPending("sendCodexCliSessionMessage")}
+          stopping={isActionPending("cancelCodexCliSessionTurn")}
+          mutating={["openCodexCliSession", "renameCodexCliSession", "forkCodexCliSession", "archiveCodexCliSession", "unarchiveCodexCliSession", "deleteCodexCliSession"].some((action) => isActionPending(action as DashboardActionName))}
           error={cliSessionsError}
           messagesError={cliSessionMessagesError}
-          onClose={() => setCliSessionsOpen(false)}
+          feedback={cliSessionFeedback}
+          onDashboard={() => navigateDashboardPath("/", setBrowserPath)}
+          onRefresh={() => sendAction("listCodexCliSessions")}
           onSelect={selectCliSession}
-          onBack={() => { setSelectedCliSession(undefined); setCliSessionMessages([]); setCliSessionMessagesError(undefined); }}
-        />
+          onBackToList={() => { navigateDashboardPath("/sessions", setBrowserPath); setSelectedCliSession(undefined); setCliSessionMessages([]); setCliSessionMessagesError(undefined); }}
+          onRefreshMessages={() => selectedCliSession && sendAction("getCodexCliSessionMessages", undefined, { sessionId: selectedCliSession.id })}
+          onSend={(input) => selectedCliSession && sendAction("sendCodexCliSessionMessage", undefined, { sessionId: selectedCliSession.id, ...input })}
+          onStop={() => selectedCliSession && sendAction("cancelCodexCliSessionTurn", undefined, { sessionId: selectedCliSession.id })}
+          onOpenInVsCode={() => selectedCliSession && sendAction("openCodexCliSession", undefined, { sessionId: selectedCliSession.id })}
+          onRename={(name) => selectedCliSession && sendAction("renameCodexCliSession", undefined, { sessionId: selectedCliSession.id, text: name })}
+          onFork={() => selectedCliSession && sendAction("forkCodexCliSession", undefined, { sessionId: selectedCliSession.id })}
+          onCopyLink={() => {
+            void navigator.clipboard.writeText(window.location.href).then(
+              () => setCliSessionFeedback({ key: Date.now(), level: "info", message: "Session link copied." }),
+              () => setCliSessionFeedback({ key: Date.now(), level: "error", message: "Session link could not be copied. Copy it from the address bar." })
+            );
+          }}
+          onShare={() => {
+            if (navigator.share) {
+              void navigator.share({ title: selectedCliSession?.title ?? "Codex session", url: window.location.href }).then(
+                () => setCliSessionFeedback({ key: Date.now(), level: "info", message: "Session link shared." }),
+                (error: unknown) => setCliSessionFeedback({ key: Date.now(), level: "warning", message: error instanceof Error && error.name === "AbortError" ? "Sharing cancelled." : "Session link could not be shared." })
+              );
+            } else {
+              void navigator.clipboard.writeText(window.location.href).then(
+                () => setCliSessionFeedback({ key: Date.now(), level: "info", message: "Sharing is unavailable, so the session link was copied instead." }),
+                () => setCliSessionFeedback({ key: Date.now(), level: "error", message: "Sharing is unavailable and the link could not be copied." })
+              );
+            }
+          }}
+          onArchive={() => selectedCliSession && sendAction("archiveCodexCliSession", undefined, { sessionId: selectedCliSession.id })}
+          onUnarchive={(session) => sendAction("unarchiveCodexCliSession", undefined, { sessionId: session.id })}
+          onDelete={(session) => sendAction("deleteCodexCliSession", undefined, { sessionId: session.id, confirmed: true })}
+        />,
+        document.body
       ) : null}
 
       <AddAccountModal

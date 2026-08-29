@@ -8,12 +8,27 @@ import type { DashboardActionContext } from "../src/presentation/dashboard/actio
 const { consumeResetCreditMock } = vi.hoisted(() => ({
   consumeResetCreditMock: vi.fn().mockResolvedValue(undefined)
 }));
+const { readCodexCliSessionsMock, readCodexCliSessionSummaryMock, readCodexCliSessionMessagesMock } = vi.hoisted(() => ({
+  readCodexCliSessionsMock: vi.fn(),
+  readCodexCliSessionSummaryMock: vi.fn(),
+  readCodexCliSessionMessagesMock: vi.fn()
+}));
 
 vi.mock("../src/services/quota", async () => {
   const actual = await vi.importActual<typeof import("../src/services/quota")>("../src/services/quota");
   return {
     ...actual,
     consumeResetCredit: consumeResetCreditMock
+  };
+});
+
+vi.mock("../src/services/codexSessionResume", async () => {
+  const actual = await vi.importActual<typeof import("../src/services/codexSessionResume")>("../src/services/codexSessionResume");
+  return {
+    ...actual,
+    readCodexCliSessions: readCodexCliSessionsMock,
+    readCodexCliSessionSummary: readCodexCliSessionSummaryMock,
+    readCodexCliSessionMessages: readCodexCliSessionMessagesMock
   };
 });
 
@@ -49,6 +64,258 @@ describe("isSafeExternalUrl", () => {
 });
 
 describe("executeDashboardActionMessage", () => {
+  it("opens the CLI Sessions web route with visible completion feedback", async () => {
+    vi.mocked(vscode.commands.executeCommand).mockReset().mockResolvedValueOnce("opened");
+
+    const result = await executeDashboardActionMessage(createContext(), {
+      type: "dashboard:action",
+      action: "openWebDashboard",
+      requestId: "req-open-cli-sessions",
+      payload: { path: "/sessions" }
+    });
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      "codexAccounts.openWebDashboard",
+      { pathname: "/sessions" }
+    );
+    expect(result.status).toBe("completed");
+    expect(result.payload?.notice).toEqual({ level: "info", message: "Opened CLI Sessions in the Web Dashboard." });
+  });
+
+  it("returns a visible failure and does not open an archived CLI session", async () => {
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValueOnce({
+      get: (key: string, fallback?: unknown) => key === "cliIntegrationEnabled" ? true : fallback
+    } as unknown as vscode.WorkspaceConfiguration);
+    readCodexCliSessionSummaryMock.mockResolvedValueOnce({
+      id: "01a04882-d037-7a42-ad24-9afb61901188",
+      title: "Archived demo",
+      status: "idle",
+      archived: true
+    });
+    readCodexCliSessionMessagesMock.mockClear();
+
+    const result = await executeDashboardActionMessage(createContext(), {
+      type: "dashboard:action",
+      action: "getCodexCliSessionMessages",
+      requestId: "req-archived-session",
+      payload: { sessionId: "01a04882-d037-7a42-ad24-9afb61901188" }
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/archived sessions cannot be opened/i);
+    expect(readCodexCliSessionMessagesMock).not.toHaveBeenCalled();
+  });
+
+  it("returns visible completion feedback when the overview lock is set or removed", async () => {
+    const account = { id: "lock-account", email: "lock@example.com" };
+    const context = {
+      ...createContext(),
+      repo: { getAccount: vi.fn().mockResolvedValue(account) } as unknown as DashboardActionContext["repo"]
+    };
+
+    const locked = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "setAutoSwitchLock",
+      requestId: "req-lock",
+      accountId: account.id,
+      payload: { lockMinutes: 15 }
+    });
+    const unlocked = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "setAutoSwitchLock",
+      requestId: "req-unlock",
+      accountId: account.id,
+      payload: { lockMinutes: 0 }
+    });
+
+    expect(locked.status).toBe("completed");
+    expect(locked.payload?.notice).toEqual({ level: "info", message: "Auto-switch locked for 15 minutes." });
+    expect(unlocked.status).toBe("completed");
+    expect(unlocked.payload?.notice).toEqual({ level: "info", message: "Auto-switch lock removed." });
+    expect(context.schedulePublishState).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens the VS Code account picker when overview Switch has no preset target", async () => {
+    vi.mocked(vscode.commands.executeCommand).mockReset().mockResolvedValue({ status: "cancelled" });
+    const context = { ...createContext(), hostKind: "webview" as const };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "switch",
+      requestId: "req-switch-picker"
+    });
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith("codexAccounts.switchAccount", undefined);
+    expect(result.status).toBe("completed");
+    expect(result.payload?.notice).toEqual({ level: "warning", message: "Account switch cancelled." });
+    expect(context.schedulePublishState).toHaveBeenCalled();
+  });
+
+  it("requires the browser account picker to supply a switch target", async () => {
+    const result = await executeDashboardActionMessage(
+      { ...createContext(), hostKind: "browser" },
+      {
+        type: "dashboard:action",
+        action: "switch",
+        requestId: "req-browser-switch-missing"
+      }
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/choose an account/i);
+  });
+
+  it("returns a visible reload outcome when the VS Code reload prompt is postponed", async () => {
+    setCurrentWindowRuntimeAccountId("account-before-reload");
+    vi.mocked(vscode.window.showInformationMessage).mockReset().mockResolvedValue("Later" as never);
+    const account = { id: "account-next", email: "next@example.com" };
+    const context = {
+      ...createContext(),
+      hostKind: "webview" as const,
+      repo: { getAccount: vi.fn().mockResolvedValue(account) } as unknown as DashboardActionContext["repo"]
+    };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "reloadPrompt",
+      requestId: "req-reload-later",
+      accountId: account.id
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.payload?.notice?.level).toBe("warning");
+    expect(result.payload?.notice?.message).toMatch(/not started|postponed/i);
+  });
+
+  it("requires in-page confirmation before a browser reload", async () => {
+    setCurrentWindowRuntimeAccountId("account-before-reload");
+    vi.mocked(vscode.commands.executeCommand).mockClear();
+    const account = { id: "account-next", email: "next@example.com" };
+    const context = {
+      ...createContext(),
+      hostKind: "browser" as const,
+      repo: { getAccount: vi.fn().mockResolvedValue(account) } as unknown as DashboardActionContext["repo"]
+    };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "reloadPrompt",
+      requestId: "req-browser-reload-unconfirmed",
+      accountId: account.id
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.errorMessage).toMatch(/confirm the reload/i);
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.restartExtensionHost");
+  });
+
+  it("switches directly for the port dashboard without opening a VS Code picker", async () => {
+    setCurrentWindowRuntimeAccountId("current-window-account");
+    vi.mocked(vscode.commands.executeCommand).mockClear();
+    const account = {
+      id: "browser-target",
+      email: "browser@example.com",
+      isActive: false,
+      tokenRefreshEnabled: false
+    };
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      switchAccount: vi.fn().mockResolvedValue({ ...account, isActive: true }),
+      flush: vi.fn().mockResolvedValue(undefined)
+    } as unknown as DashboardActionContext["repo"];
+    const context = { ...createContext(), repo, hostKind: "browser" as const };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "switch",
+      requestId: "req-browser-switch",
+      accountId: account.id
+    });
+
+    expect(result.status).toBe("completed");
+    expect(repo.switchAccount).toHaveBeenCalledWith(account.id, { forceTokenRefresh: false });
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("codexAccounts.switchAccount", expect.anything());
+    expect(result.payload).toMatchObject({ reloadRequired: true, reloadAccountId: account.id });
+    setCurrentWindowRuntimeAccountId(undefined);
+  });
+
+  it("keeps the VS Code webview switch on the registered VS Code command", async () => {
+    vi.mocked(vscode.commands.executeCommand).mockReset().mockResolvedValue(undefined);
+    const account = { id: "webview-target", email: "webview@example.com", isActive: false };
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      switchAccount: vi.fn(),
+      flush: vi.fn().mockResolvedValue(undefined)
+    } as unknown as DashboardActionContext["repo"];
+
+    const result = await executeDashboardActionMessage(
+      { ...createContext(), repo, hostKind: "webview" },
+      {
+        type: "dashboard:action",
+        action: "switch",
+        requestId: "req-webview-switch",
+        accountId: account.id
+      }
+    );
+
+    expect(result.status).toBe("completed");
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith("codexAccounts.switchAccount", account);
+    expect(repo.switchAccount).not.toHaveBeenCalled();
+  });
+
+  it("requires browser confirmation and removes directly after it is supplied", async () => {
+    vi.mocked(vscode.window.showWarningMessage).mockClear();
+    const account = { id: "remove-target", email: "remove@example.com" };
+    const repo = {
+      getAccount: vi.fn().mockResolvedValue(account),
+      removeAccount: vi.fn().mockResolvedValue(undefined),
+      flush: vi.fn().mockResolvedValue(undefined)
+    } as unknown as DashboardActionContext["repo"];
+    const context = { ...createContext(), repo, hostKind: "browser" as const };
+
+    const unconfirmed = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "remove",
+      requestId: "req-browser-remove-unconfirmed",
+      accountId: account.id
+    });
+    const confirmed = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "remove",
+      requestId: "req-browser-remove-confirmed",
+      accountId: account.id,
+      payload: { confirmed: true }
+    });
+
+    expect(unconfirmed.status).toBe("failed");
+    expect(confirmed.status).toBe("completed");
+    expect(repo.removeAccount).toHaveBeenCalledTimes(1);
+    expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(confirmed.payload?.notice?.message).toContain("remove@example.com");
+  });
+
+  it("uses the port host encrypted-sync callbacks instead of VS Code prompts", async () => {
+    vi.mocked(vscode.commands.executeCommand).mockClear();
+    const configureEncryptedSync = vi.fn().mockResolvedValue(true);
+    const context = {
+      ...createContext(),
+      hostKind: "browser" as const,
+      configureEncryptedSync
+    };
+
+    const result = await executeDashboardActionMessage(context, {
+      type: "dashboard:action",
+      action: "configureEncryptedSync",
+      requestId: "req-browser-configure-sync",
+      payload: { passphrase: "secret-passphrase", passphraseConfirmation: "secret-passphrase" }
+    });
+
+    expect(result.status).toBe("completed");
+    expect(configureEncryptedSync).toHaveBeenCalledWith("secret-passphrase", "secret-passphrase");
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith("codexAccounts.configureEncryptedSync");
+    expect(result.payload?.notice?.message).toMatch(/configured/i);
+  });
+
   it("does not block a reload prompt when another window already has the same action in flight", async () => {
     const blocker = new CrossWindowOperationCoordinator(operationDirectory);
     let releaseBlocker!: () => void;

@@ -1,8 +1,22 @@
 import * as vscode from "vscode";
-import { refreshSingleQuota } from "../../application/accounts/quota";
+import { refreshImportedAccountQuota, refreshSingleQuota } from "../../application/accounts/quota";
 import { fetchResetCredits, consumeResetCredit } from "../../services/quota";
 import { fetchDailyUsageBreakdown } from "../../services/usage";
-import { readCodexCliSessions, readCodexCliSessionMessages } from "../../services/codexSessionResume";
+import {
+  archiveCodexCliSession,
+  cancelCodexCliSessionTurn,
+  CodexCliTurnCancelledError,
+  deleteCodexCliSession,
+  forkCodexCliSession,
+  openCodexCliSessionInVsCode,
+  readCodexCliComposerConfig,
+  readCodexCliSessionSummary,
+  readCodexCliSessions,
+  readCodexCliSessionMessages,
+  renameCodexCliSession,
+  sendCodexCliSessionMessage,
+  unarchiveCodexCliSession
+} from "../../services/codexSessionResume";
 import { getCodexAccountsConfiguration } from "../../infrastructure/config/extensionSettings";
 import { upsertDashboardDailyUsageCache } from "../../services/dashboardUsageHistory";
 import { getDashboardCopy } from "../../application/dashboard/copy";
@@ -14,6 +28,7 @@ import type {
   DashboardHostMessage
 } from "../../domain/dashboard/types";
 import type { CodexAccountRecord, CodexAccountsBackup } from "../../core/types";
+import type { SwitchAccountCommandResult } from "../../application/accounts/commandService";
 import type { DashboardLanguage } from "../../localization/languages";
 import { AccountsRepository } from "../../storage";
 import { AnnouncementService, type AnnouncementOptions } from "../../services/announcements";
@@ -36,7 +51,6 @@ const COMMAND_ROUTED_ACTIONS = new Set<DashboardActionName>([
   "setWebDashboardPassword",
   "reauthorize",
   "details",
-  "switch",
   "refresh",
   "remove",
   "prepareOAuthSession",
@@ -59,12 +73,25 @@ const COMMAND_ROUTED_ACTIONS = new Set<DashboardActionName>([
   "getResetCredits",
   "getDailyUsage",
   "listCodexCliSessions",
-  "getCodexCliSessionMessages"
+  "getCodexCliSessionMessages",
+  "sendCodexCliSessionMessage",
+  "cancelCodexCliSessionTurn",
+  "openCodexCliSession",
+  "renameCodexCliSession",
+  "forkCodexCliSession",
+  "archiveCodexCliSession",
+  "unarchiveCodexCliSession",
+  "deleteCodexCliSession"
 ]);
 import type { DashboardOAuthCoordinator } from "./oauthCoordinator";
 import { ExtensionSettingsStore } from "../../infrastructure/config/extensionSettings";
 import { handleDashboardSettingUpdate } from "./settings";
-import { promptWindowReloadForAccount } from "../../application/accounts/switchEffects";
+import {
+  autoReloadWindowForAccount,
+  deferWindowReloadForAccount,
+  handleCodexAppRestartPreference,
+  promptWindowReloadForAccount
+} from "../../application/accounts/switchEffects";
 import { refreshTokens } from "../../auth/oauth";
 import { shouldSuppressDashboardNotifications } from "../../utils/notificationPolicy";
 import {
@@ -82,18 +109,24 @@ export type DashboardActionContext = {
   oauth: DashboardOAuthCoordinator;
   announcements: AnnouncementService;
   getAnnouncementOptions: () => AnnouncementOptions;
+  /** Browser actions must never open VS Code-owned prompts or confirmations. */
+  hostKind?: "webview" | "browser";
+  configureEncryptedSync?: (passphrase: string, confirmation: string) => Promise<boolean>;
+  syncEncryptedAccounts?: () => Promise<boolean>;
+  setEncryptedSyncRegistryOverride?: (enabled: boolean, passphrase?: string) => Promise<boolean>;
+  setWebDashboardPassword?: (password: string) => Promise<void>;
 };
 
 const CODEX_BATCH_REFRESH_CONCURRENCY = 1;
 const CODEX_BATCH_REFRESH_DELAY_MS = 300;
 const ACCOUNT_REQUIRED_ACTIONS = new Set<DashboardActionName>([
   "exportAuthFile",
+  "setAutoSwitchLock",
   "reloadPrompt",
   "reauthorize",
   "resyncProfile",
   "dismissHealthIssue",
   "details",
-  "switch",
   "refresh",
   "remove",
   "toggleAccountEnabled",
@@ -133,9 +166,18 @@ export async function executeDashboardActionMessage(
         await ctx.repo.flush?.();
       }
     };
-    payload = COMMAND_ROUTED_ACTIONS.has(message.action) ? await execute() : await executeAndFlush();
+    const browserDirectMutation =
+      ctx.hostKind === "browser" &&
+      (message.action === "switch" ||
+        message.action === "remove" ||
+        message.action === "batchRemove" ||
+        message.action === "consumeResetCredit" ||
+        message.action === "updateTags");
+    payload = COMMAND_ROUTED_ACTIONS.has(message.action) && !browserDirectMutation
+      ? await execute()
+      : await executeAndFlush();
   } catch (error) {
-    status = "failed";
+    status = error instanceof CodexCliTurnCancelledError ? "cancelled" : "failed";
     errorMessage = toFailureMessage(error);
     console.error(`[codexAccounts] dashboard action failed: ${message.action}`, error);
     if (!shouldSuppressDashboardNotifications() && (message.action === "switch" || message.action === "refreshToken")) {
@@ -165,6 +207,23 @@ async function runDashboardAction(
       await vscode.commands.executeCommand("codexAccounts.addAccount");
       return undefined;
     case "importCurrent":
+      if (ctx.hostKind === "browser") {
+        const imported = await ctx.repo.importCurrentAuth();
+        const quotaResult = await refreshImportedAccountQuota(ctx.repo, imported.id);
+        const reloadRequired = deferWindowReloadForAccount(imported.id);
+        ctx.schedulePublishState();
+        return {
+          email: imported.email,
+          reloadRequired,
+          reloadAccountId: imported.id,
+          notice: {
+            level: quotaResult.error ? "warning" as const : "info" as const,
+            message: quotaResult.error
+              ? `Imported ${imported.email}, but quota refresh failed: ${quotaResult.error.message}`
+              : `Imported ${imported.email}.`
+          }
+        };
+      }
       await vscode.commands.executeCommand("codexAccounts.importCurrentAuth");
       return undefined;
     case "refreshAll":
@@ -187,6 +246,19 @@ async function runDashboardAction(
     case "exportBackup":
       return handleExportBackup(ctx.repo);
     case "configureEncryptedSync":
+      if (ctx.hostKind === "browser") {
+        if (!payload?.passphrase || !payload.passphraseConfirmation) {
+          throw new Error("Enter and confirm the sync passphrase in the browser dashboard.");
+        }
+        if (!ctx.configureEncryptedSync) {
+          throw new Error("Encrypted sync is unavailable in the browser dashboard host.");
+        }
+        if (!(await ctx.configureEncryptedSync(payload.passphrase, payload.passphraseConfirmation))) {
+          throw new Error("Encrypted sync was not configured. Check the passphrase and try again.");
+        }
+        ctx.schedulePublishState();
+        return { notice: { level: "info" as const, message: "Encrypted sync is configured." } };
+      }
       if ((await vscode.commands.executeCommand<boolean>("codexAccounts.configureEncryptedSync")) !== true) {
         ctx.schedulePublishState();
         throw new Error("The sync passphrase was not set. Try again and complete the passphrase prompts.");
@@ -194,6 +266,15 @@ async function runDashboardAction(
       ctx.schedulePublishState();
       return undefined;
     case "syncNow":
+      if (ctx.hostKind === "browser" && ctx.syncEncryptedAccounts) {
+        if (!(await ctx.syncEncryptedAccounts())) {
+          throw new Error(
+            "Encrypted account sync did not complete. Make sure VS Code Settings Sync is active on this PC, then try again."
+          );
+        }
+        ctx.schedulePublishState();
+        return { notice: { level: "info" as const, message: "Encrypted account sync completed." } };
+      }
       if ((await vscode.commands.executeCommand<boolean>("codexAccounts.syncNow")) !== true) {
         ctx.schedulePublishState();
         throw new Error(
@@ -205,6 +286,30 @@ async function runDashboardAction(
     case "setEncryptedSyncRegistryOverride":
       if (typeof payload?.enabled !== "boolean") {
         throw new Error("The rescue override request is invalid.");
+      }
+      if (ctx.hostKind === "browser") {
+        if (!ctx.setEncryptedSyncRegistryOverride) {
+          throw new Error("The rescue override is unavailable in the browser dashboard host.");
+        }
+        if (payload.enabled && !payload.passphrase) {
+          throw new Error("Enter the encrypted sync passphrase in the browser dashboard.");
+        }
+        if (!(await ctx.setEncryptedSyncRegistryOverride(payload.enabled, payload.passphrase))) {
+          throw new Error(
+            payload.enabled
+              ? "Rescue override was not enabled. Check the encrypted sync passphrase and try again."
+              : "Rescue override could not be disabled. Try again."
+          );
+        }
+        ctx.schedulePublishState();
+        return {
+          notice: {
+            level: payload.enabled ? "warning" as const : "info" as const,
+            message: payload.enabled
+              ? "Rescue override enabled on this PC. Foreign-PC claims are warning-only."
+              : "Rescue override disabled. The synchronized registry is enforced again."
+          }
+        };
       }
       if (
         (await vscode.commands.executeCommand<boolean>(
@@ -236,9 +341,33 @@ async function runDashboardAction(
       await vscode.commands.executeCommand("codexAccounts.showQuotaSummary");
       return undefined;
     case "openWebDashboard":
-      await vscode.commands.executeCommand("codexAccounts.openWebDashboard");
-      return undefined;
+      {
+        const openResult = await vscode.commands.executeCommand<"opened" | "cancelled" | "unavailable">(
+          "codexAccounts.openWebDashboard",
+          { pathname: payload?.path }
+        );
+        return {
+          notice: openResult === "opened"
+            ? { level: "info" as const, message: payload?.path === "/sessions" ? "Opened CLI Sessions in the Web Dashboard." : "Opened the Web Dashboard." }
+            : openResult === "cancelled"
+              ? { level: "warning" as const, message: "Opening the Web Dashboard was cancelled." }
+              : { level: "warning" as const, message: "The Web Dashboard is unavailable. Enable it and set a password, then try again." }
+        };
+      }
     case "setWebDashboardPassword":
+      if (ctx.hostKind === "browser") {
+        if (!ctx.setWebDashboardPassword) {
+          throw new Error("The browser dashboard password service is unavailable.");
+        }
+        await ctx.setWebDashboardPassword(payload?.password ?? "");
+        ctx.schedulePublishState();
+        return {
+          notice: {
+            level: "info" as const,
+            message: payload?.password ? "Web Dashboard password updated." : "Web Dashboard password removed."
+          }
+        };
+      }
       await vscode.commands.executeCommand("codexAccounts.setWebDashboardPassword", payload?.password);
       ctx.schedulePublishState();
       return undefined;
@@ -263,7 +392,15 @@ async function runDashboardAction(
       await ctx.publishState(true);
       return undefined;
     case "updateTags":
-      return handleUpdateTags(ctx.repo, ctx.resolveLanguage, ctx.schedulePublishState, payload, account, translate);
+      return handleUpdateTags(
+        ctx.repo,
+        ctx.resolveLanguage,
+        ctx.schedulePublishState,
+        payload,
+        account,
+        translate,
+        ctx.hostKind === "browser"
+      );
     case "setAutoSwitchLock":
       return handleAutoSwitchLock(payload, account, ctx.schedulePublishState);
     case "batchRefresh":
@@ -271,9 +408,9 @@ async function runDashboardAction(
     case "batchResyncProfile":
       return handleBatchResync(ctx.repo, ctx.schedulePublishState, payload, translate);
     case "batchRemove":
-      return handleBatchRemove(ctx.repo, payload, translate, ctx.schedulePublishState);
+      return handleBatchRemove(ctx.repo, payload, translate, ctx.schedulePublishState, ctx.hostKind === "browser");
     case "reloadPrompt":
-      return handleReloadPrompt(account);
+      return handleReloadPrompt(account, payload, ctx.hostKind === "browser");
     case "reauthorize":
       if (account) {
         await vscode.commands.executeCommand("codexAccounts.reauthorizeAccount", account);
@@ -299,13 +436,58 @@ async function runDashboardAction(
       }
       return undefined;
     case "switch":
-      if (account) {
-        try {
-          await vscode.commands.executeCommand("codexAccounts.switchAccount", account);
+      if (ctx.hostKind === "browser") {
+        if (!account) {
+          throw new Error("Choose an account in the browser dashboard, then try again.");
+        }
+        await ctx.repo.switchAccount(account.id, {
+          forceTokenRefresh:
+            getCodexAccountsConfiguration().get<boolean>("backgroundTokenRefreshEnabled", false) &&
+            account.tokenRefreshEnabled === true
+        });
+        clearTokenAutomationError(account.id);
+        await handleCodexAppRestartPreference({ allowManualPrompt: false });
+        const reloadRequired = deferWindowReloadForAccount(account.id);
+        ctx.schedulePublishState();
+        return {
+          notice: {
+            level: "info" as const,
+            message: `Switched to ${account.email}.${reloadRequired ? " Reload this VS Code window to apply it here." : ""}`
+          },
+          reloadRequired,
+          reloadAccountId: account.id
+        };
+      }
+      {
+        const result = await vscode.commands.executeCommand<SwitchAccountCommandResult>(
+          "codexAccounts.switchAccount",
+          account
+        );
+        if (account) {
           clearTokenAutomationError(account.id);
-          ctx.schedulePublishState();
-        } catch (error) {
-          throw error;
+        }
+        ctx.schedulePublishState();
+        if (result?.status === "cancelled") {
+          return { notice: { level: "warning" as const, message: "Account switch cancelled." } };
+        }
+        if (result?.status === "already-active") {
+          return {
+            notice: {
+              level: "info" as const,
+              message: `${result.account?.email ?? "That account"} is already active.`
+            }
+          };
+        }
+        if (result?.status === "switched" && result.account) {
+          return {
+            notice: {
+              level: result.reloadNeeded && !result.reloaded ? "warning" as const : "info" as const,
+              message:
+                result.reloadNeeded && !result.reloaded
+                  ? `Switched to ${result.account.email}. Reload this VS Code window to apply it here.`
+                  : `Switched to ${result.account.email}.`
+            }
+          };
         }
       }
       return undefined;
@@ -316,6 +498,16 @@ async function runDashboardAction(
       return undefined;
     case "remove":
       if (account) {
+        if (ctx.hostKind === "browser") {
+          if (payload?.confirmed !== true) {
+            throw new Error("Confirm account removal in the browser dashboard, then try again.");
+          }
+          await ctx.repo.removeAccount(account.id);
+          ctx.schedulePublishState();
+          return {
+            notice: { level: "info" as const, message: `Removed account ${account.email}.` }
+          };
+        }
         await vscode.commands.executeCommand("codexAccounts.removeAccount", account);
       }
       return undefined;
@@ -351,8 +543,31 @@ async function runDashboardAction(
       return handleListCodexCliSessions();
     case "getCodexCliSessionMessages":
       return handleGetCodexCliSessionMessages(payload?.sessionId);
+    case "sendCodexCliSessionMessage":
+      return handleSendCodexCliSessionMessage(payload);
+    case "cancelCodexCliSessionTurn":
+      return handleCancelCodexCliSessionTurn(payload?.sessionId);
+    case "openCodexCliSession":
+      return handleOpenCodexCliSession(payload?.sessionId);
+    case "renameCodexCliSession":
+      return handleRenameCodexCliSession(payload?.sessionId, payload?.text);
+    case "forkCodexCliSession":
+      return handleForkCodexCliSession(payload?.sessionId);
+    case "archiveCodexCliSession":
+      return handleArchiveCodexCliSession(payload?.sessionId);
+    case "unarchiveCodexCliSession":
+      return handleUnarchiveCodexCliSession(payload?.sessionId);
+    case "deleteCodexCliSession":
+      return handleDeleteCodexCliSession(payload);
     case "consumeResetCredit":
-      return handleConsumeResetCredit(ctx.repo, account, ctx.schedulePublishState, ctx.resolveLanguage());
+      return handleConsumeResetCredit(
+        ctx.repo,
+        account,
+        ctx.schedulePublishState,
+        ctx.resolveLanguage(),
+        ctx.hostKind === "browser",
+        payload
+      );
     default:
       throw new Error(`Unsupported dashboard action: ${String(action)}`);
   }
@@ -732,7 +947,8 @@ async function handleUpdateTags(
   schedulePublishState: () => void,
   payload: DashboardActionPayload | undefined,
   account: CodexAccountRecord | undefined,
-  translate: ReturnType<typeof t>
+  translate: ReturnType<typeof t>,
+  browserHost = false
 ) {
   const targetIds = payload?.accountIds?.length ? payload.accountIds : account ? [account.id] : [];
   if (!targetIds.length) {
@@ -741,13 +957,18 @@ async function handleUpdateTags(
   const dashboardCopy = getDashboardCopy(resolveLanguage());
   const targetAccount = targetIds.length === 1 ? (account ?? (await repo.getAccount(targetIds[0]!))) : undefined;
   const mode = payload?.mode === "add" || payload?.mode === "remove" ? payload.mode : "set";
-  const tags = await promptForTags({
-    copy: dashboardCopy,
-    mode,
-    initialTags: targetAccount?.tags ?? [],
-    label: targetIds.length === 1 ? targetAccount?.email : undefined
-  });
+  const tags = browserHost
+    ? payload?.submittedTags
+    : await promptForTags({
+        copy: dashboardCopy,
+        mode,
+        initialTags: targetAccount?.tags ?? [],
+        label: targetIds.length === 1 ? targetAccount?.email : undefined
+      });
   if (tags === undefined) {
+    if (browserHost) {
+      throw new Error("Enter tags in the browser dashboard, then try again.");
+    }
     return undefined;
   }
 
@@ -761,17 +982,19 @@ async function handleUpdateTags(
     await repo.addAccountTags(targetIds, tags);
   }
   schedulePublishState();
-  void vscode.window.showInformationMessage(
-    translate("message.batchTagsSummary", {
-      count: targetIds.length,
-      action:
-        mode === "add"
-          ? dashboardCopy.addTagsBtn
-          : mode === "remove"
-            ? dashboardCopy.removeTagsBtn
-            : dashboardCopy.editTagsBtn
-    })
-  );
+  const message = translate("message.batchTagsSummary", {
+    count: targetIds.length,
+    action:
+      mode === "add"
+        ? dashboardCopy.addTagsBtn
+        : mode === "remove"
+          ? dashboardCopy.removeTagsBtn
+          : dashboardCopy.editTagsBtn
+  });
+  if (browserHost) {
+    return { notice: { level: "info" as const, message } };
+  }
+  void vscode.window.showInformationMessage(message);
   return undefined;
 }
 
@@ -783,7 +1006,7 @@ function handleAutoSwitchLock(
   const lockAccountId = account?.id ?? payload?.accountIds?.[0];
   const lockMinutes = typeof payload?.lockMinutes === "number" ? payload.lockMinutes : 0;
   if (!lockAccountId) {
-    return undefined;
+    throw new Error("This action requires an account. Refresh the dashboard and try again.");
   }
 
   if (lockMinutes > 0) {
@@ -792,7 +1015,14 @@ function handleAutoSwitchLock(
     clearAutoSwitchLock(lockAccountId);
   }
   schedulePublishState();
-  return undefined;
+  return {
+    notice: {
+      level: "info" as const,
+      message: lockMinutes > 0
+        ? `Auto-switch locked for ${lockMinutes} minute${lockMinutes === 1 ? "" : "s"}.`
+        : "Auto-switch lock removed."
+    }
+  };
 }
 
 async function handleBatchRefresh(
@@ -920,7 +1150,8 @@ async function handleBatchRemove(
   repo: AccountsRepository,
   payload: DashboardActionPayload | undefined,
   translate: ReturnType<typeof t>,
-  schedulePublishState: () => void
+  schedulePublishState: () => void,
+  browserHost = false
 ) {
   const targetIds = payload?.accountIds ?? [];
   if (!targetIds.length) {
@@ -929,13 +1160,19 @@ async function handleBatchRemove(
   const accountsById = new Map(
     await Promise.all(targetIds.map(async (id) => [id, await repo.getAccount(id)] as const))
   );
-  const choice = await vscode.window.showWarningMessage(
-    translate("message.batchRemoveConfirm", { count: targetIds.length }),
-    { modal: true },
-    translate("confirm.removeButton")
-  );
-  if (choice !== translate("confirm.removeButton")) {
-    return undefined;
+  if (browserHost) {
+    if (payload?.confirmed !== true) {
+      throw new Error("Confirm account removal in the browser dashboard, then try again.");
+    }
+  } else {
+    const choice = await vscode.window.showWarningMessage(
+      translate("message.batchRemoveConfirm", { count: targetIds.length }),
+      { modal: true },
+      translate("confirm.removeButton")
+    );
+    if (choice !== translate("confirm.removeButton")) {
+      return undefined;
+    }
   }
   let removed = 0;
   let failed = 0;
@@ -959,7 +1196,9 @@ async function handleBatchRemove(
     count: removed,
     failed
   });
-  if (failed > 0) {
+  if (browserHost) {
+    // The batch result is rendered as a terminal browser toast.
+  } else if (failed > 0) {
     void vscode.window.showWarningMessage(message);
   } else {
     void vscode.window.showInformationMessage(message);
@@ -974,11 +1213,32 @@ async function handleBatchRemove(
   };
 }
 
-async function handleReloadPrompt(account: CodexAccountRecord | undefined) {
-  if (account) {
-    await promptWindowReloadForAccount(account);
+async function handleReloadPrompt(
+  account: CodexAccountRecord | undefined,
+  payload: DashboardActionPayload | undefined,
+  browserHost = false
+) {
+  if (!account) {
+    return undefined;
   }
-  return undefined;
+  if (browserHost) {
+    if (payload?.confirmed !== true) {
+      throw new Error("Confirm the reload in the browser dashboard, then try again.");
+    }
+    const reloaded = await autoReloadWindowForAccount(account.id);
+    return reloaded
+      ? { notice: { level: "info" as const, message: "Reloading the VS Code extension host…" } }
+      : { notice: { level: "warning" as const, message: "This VS Code window is already using that account." } };
+  }
+  const reloaded = await promptWindowReloadForAccount(account);
+  return reloaded
+    ? { notice: { level: "info" as const, message: "Reloading the VS Code extension host…" } }
+    : {
+        notice: {
+          level: "warning" as const,
+          message: "Reload was not started. This window is already using that account, or the reload was postponed."
+        }
+      };
 }
 
 async function handleGetResetCredits(
@@ -1029,25 +1289,148 @@ function ensureCliIntegrationEnabled(): void {
 
 async function handleListCodexCliSessions() {
   ensureCliIntegrationEnabled();
-  return { cliSessions: await readCodexCliSessions() };
+  const [cliSessions, cliComposerConfig] = await Promise.all([
+    readCodexCliSessions(),
+    readCodexCliComposerConfig()
+  ]);
+  return { cliSessions, cliComposerConfig };
 }
 
 async function handleGetCodexCliSessionMessages(sessionId: string | undefined) {
   ensureCliIntegrationEnabled();
   if (!sessionId) throw new Error("Choose a Codex CLI session first.");
+  const cliSession = await readCodexCliSessionSummary(sessionId);
+  if (!cliSession) throw new Error("This Codex session was not found. Refresh the session list and try again.");
+  if (cliSession.archived) throw new Error("Archived sessions cannot be opened. Restore the session first.");
+  const cliSessionMessages = await readCodexCliSessionMessages(sessionId);
+  return { cliSession, cliSessionMessages };
+}
+
+async function handleSendCodexCliSessionMessage(payload: DashboardActionPayload | undefined) {
+  ensureCliIntegrationEnabled();
+  if (!payload?.sessionId) throw new Error("Choose a Codex CLI session first.");
+  await ensureCliSessionIsActive(payload.sessionId);
+  await sendCodexCliSessionMessage({
+    sessionId: payload.sessionId,
+    text: payload.text ?? "",
+    model: payload.model,
+    reasoningEffort: payload.reasoningEffort,
+    sandboxMode: payload.sandboxMode
+  });
   const [cliSessions, cliSessionMessages] = await Promise.all([
     readCodexCliSessions(),
-    readCodexCliSessionMessages(sessionId)
+    readCodexCliSessionMessages(payload.sessionId)
   ]);
-  const cliSession = cliSessions.find((session) => session.id === sessionId);
-  return { cliSession, cliSessionMessages };
+  return {
+    cliSessions,
+    cliSession: cliSessions.find((session) => session.id === payload.sessionId),
+    cliSessionMessages,
+    notice: { level: "info" as const, message: "Codex completed the turn." }
+  };
+}
+
+function handleCancelCodexCliSessionTurn(sessionId: string | undefined) {
+  ensureCliIntegrationEnabled();
+  if (!sessionId) throw new Error("Choose a Codex CLI session first.");
+  if (!cancelCodexCliSessionTurn(sessionId)) {
+    throw new Error("There is no dashboard-started Codex turn to stop in this session.");
+  }
+  return { notice: { level: "warning" as const, message: "Stopping the active Codex turn…" } };
+}
+
+async function handleOpenCodexCliSession(sessionId: string | undefined) {
+  ensureCliIntegrationEnabled();
+  if (!sessionId) throw new Error("Choose a Codex CLI session first.");
+  await ensureCliSessionIsActive(sessionId);
+  await openCodexCliSessionInVsCode(sessionId);
+  return { notice: { level: "info" as const, message: "Opened the session in the Codex extension." } };
+}
+
+async function handleRenameCodexCliSession(sessionId: string | undefined, name: string | undefined) {
+  ensureCliIntegrationEnabled();
+  if (!sessionId) throw new Error("Choose a Codex CLI session first.");
+  await ensureCliSessionIsActive(sessionId);
+  await renameCodexCliSession(sessionId, name ?? "");
+  const cliSessions = await readCodexCliSessions();
+  return {
+    cliSessions,
+    cliSession: cliSessions.find((session) => session.id === sessionId),
+    notice: { level: "info" as const, message: "Session renamed." }
+  };
+}
+
+async function handleForkCodexCliSession(sessionId: string | undefined) {
+  ensureCliIntegrationEnabled();
+  if (!sessionId) throw new Error("Choose a Codex CLI session first.");
+  const sourceSession = await ensureCliSessionIsActive(sessionId);
+  const forkedId = await forkCodexCliSession(sessionId);
+  const cliSessions = await readCodexCliSessions();
+  const forkedSession = cliSessions.find((session) => session.id === forkedId) ?? {
+    id: forkedId,
+    title: `${sourceSession.title} (fork)`,
+    status: "idle" as const,
+    archived: false
+  };
+  return {
+    cliSessions: cliSessions.some((session) => session.id === forkedId) ? cliSessions : [forkedSession, ...cliSessions],
+    cliSession: forkedSession,
+    notice: { level: "info" as const, message: "Session fork created." }
+  };
+}
+
+async function handleArchiveCodexCliSession(sessionId: string | undefined) {
+  ensureCliIntegrationEnabled();
+  if (!sessionId) throw new Error("Choose a Codex CLI session first.");
+  await ensureCliSessionIsActive(sessionId);
+  await archiveCodexCliSession(sessionId);
+  return {
+    cliSessions: await readCodexCliSessions(),
+    notice: { level: "info" as const, message: "Codex session archived." }
+  };
+}
+
+async function handleUnarchiveCodexCliSession(sessionId: string | undefined) {
+  ensureCliIntegrationEnabled();
+  if (!sessionId) throw new Error("Choose a Codex CLI session first.");
+  const session = await findCliSession(sessionId);
+  if (!session.archived) throw new Error("This session is already active.");
+  await unarchiveCodexCliSession(sessionId);
+  return {
+    cliSessions: await readCodexCliSessions(),
+    notice: { level: "info" as const, message: "Codex session restored to Active." }
+  };
+}
+
+async function handleDeleteCodexCliSession(payload: DashboardActionPayload | undefined) {
+  ensureCliIntegrationEnabled();
+  if (!payload?.sessionId) throw new Error("Choose a Codex CLI session first.");
+  if (payload.confirmed !== true) throw new Error("Confirm permanent deletion, then try again.");
+  await deleteCodexCliSession(payload.sessionId);
+  return {
+    cliSessions: await readCodexCliSessions(),
+    notice: { level: "info" as const, message: "Codex session permanently deleted." }
+  };
+}
+
+async function findCliSession(sessionId: string) {
+  const session = await readCodexCliSessionSummary(sessionId);
+  if (!session) throw new Error("This Codex session was not found. Refresh the session list and try again.");
+  return session;
+}
+
+async function ensureCliSessionIsActive(sessionId: string) {
+  const session = await findCliSession(sessionId);
+  if (session.archived) throw new Error("Restore this archived session before opening or continuing it.");
+  return session;
 }
 
 async function handleConsumeResetCredit(
   repo: AccountsRepository,
   account?: Awaited<ReturnType<AccountsRepository["getAccount"]>>,
   schedulePublishState?: () => void,
-  lang?: string
+  lang?: string,
+  browserHost = false,
+  payload?: DashboardActionPayload
 ) {
   if (!account) {
     throw new Error("Account not found");
@@ -1066,9 +1449,15 @@ async function handleConsumeResetCredit(
     : `Reset your rate limit and keep working without interruption. You have ${available} reset(s) available.`;
   const confirmBtn = isZh ? "重置速率限制" : "Reset Rate Limit";
 
-  const choice = await vscode.window.showWarningMessage(`${title}\n\n${body}`, { modal: true }, confirmBtn);
-  if (choice !== confirmBtn) {
-    return undefined;
+  if (browserHost) {
+    if (payload?.confirmed !== true) {
+      throw new Error("Confirm the rate-limit reset in the browser dashboard, then try again.");
+    }
+  } else {
+    const choice = await vscode.window.showWarningMessage(`${title}\n\n${body}`, { modal: true }, confirmBtn);
+    if (choice !== confirmBtn) {
+      return undefined;
+    }
   }
 
   const tokens = await repo.getTokens(account.id);
@@ -1079,17 +1468,30 @@ async function handleConsumeResetCredit(
   const accountId = account.accountId ?? undefined;
   await consumeResetCredit(tokens.accessToken, accountId);
 
-  void vscode.window.showInformationMessage(
-    isZh ? "速率限制已重置，你可以继续工作了。" : "Rate limit has been reset. You can continue working."
-  );
+  const successMessage = isZh
+    ? "速率限制已重置，你可以继续工作了。"
+    : "Rate limit has been reset. You can continue working.";
+  if (!browserHost) {
+    void vscode.window.showInformationMessage(successMessage);
+  }
 
   if (account) {
     try {
-      await vscode.commands.executeCommand("codexAccounts.refreshQuota", account);
+      if (browserHost) {
+        await refreshSingleQuota(repo, { refresh() {} }, account.id, {
+          announce: false,
+          refreshView: false,
+          warnQuota: false,
+          forceRefresh: true
+        });
+        schedulePublishState?.();
+      } else {
+        await vscode.commands.executeCommand("codexAccounts.refreshQuota", account);
+      }
     } catch (error) {
       console.warn("[codexAccounts] refresh quota after consuming reset credit failed:", error);
       schedulePublishState?.();
     }
   }
-  return undefined;
+  return browserHost ? { notice: { level: "info" as const, message: successMessage } } : undefined;
 }

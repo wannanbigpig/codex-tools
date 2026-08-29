@@ -19,7 +19,7 @@ import { formatAccountUsageDuration } from "../../src/utils/accountUsage";
 import { ActionButton } from "./primitives";
 import { MetricGauge } from "./accountMetricPrimitives";
 import { AccountAccessIcon, renderRefreshIcon, renderReloadIcon, renderSwitchIcon, ResetCreditIcon } from "./icons";
-import { compareDashboardAutoQueueAccounts, hasDashboardAutoQueueCapability } from "./accountSorting";
+import { hasDashboardAutoQueueCapability } from "./accountSorting";
 import { canRunAccountOnThisPc } from "./accountRunPolicy";
 
 export type { DashboardUsageSample } from "../../src/domain/dashboard/types";
@@ -49,6 +49,8 @@ export function OverviewSection(props: {
   onConfigureSync: () => void;
   onSyncNow: () => void;
   syncPending: boolean;
+  switchPending: boolean;
+  reloadPending: boolean;
   registryOverridePending: boolean;
   onSetRegistryOverride: (enabled: boolean) => void;
   onConsumeResetCredit: () => void;
@@ -78,21 +80,28 @@ export function OverviewSection(props: {
   const lockPopoverContentRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const morePopoverContentRef = useRef<HTMLDivElement>(null);
-  const [lockPopoverPosition] = useState({ top: 0, right: 0 });
+  const [lockPopoverPosition, setLockPopoverPosition] = useState({ top: 0, right: 0 });
   const [morePopoverPosition, setMorePopoverPosition] = useState({ top: 0, right: 0 });
-  const switchTarget = account && props.accounts
-    ? props.accounts
-        .filter(
-          (candidate) =>
-            !candidate.isActive &&
-            hasDashboardAutoQueueCapability(candidate) &&
-            canRunAccountOnThisPc(candidate, props.disabled, settings.encryptedSyncRegistryOverrideEnabled)
-        )
-        .sort(compareDashboardAutoQueueAccounts)[0]
-    : undefined;
+  const hasSwitchCandidate = Boolean(
+    account &&
+      props.accounts?.some(
+        (candidate) =>
+          !candidate.isActive &&
+          !candidate.switchQueued &&
+          hasDashboardAutoQueueCapability(candidate) &&
+          canRunAccountOnThisPc(candidate, props.disabled, settings.encryptedSyncRegistryOverrideEnabled)
+      )
+  );
   const contextAction = account
     ? resolveOverviewContextAction(account, settings.encryptedSyncRegistryOverrideEnabled)
     : "switch";
+  const openLockDialog = (trigger: HTMLElement): void => {
+    const rect = trigger.getBoundingClientRect();
+    setLockPopoverPosition({ top: rect.bottom + 5, right: Math.max(8, window.innerWidth - rect.right) });
+    setMoreOpen(false);
+    setLockMinutes(resolveLockMinutes(settings.autoSwitchLockMinutes));
+    setLockDialogOpen(true);
+  };
   const toggleMoreMenu = (): void => {
     if (!moreOpen) {
       const rect = moreRef.current?.getBoundingClientRect();
@@ -355,12 +364,22 @@ export function OverviewSection(props: {
                     contextAction === "reload" ? renderReloadIcon() : contextAction === "switch" ? renderSwitchIcon() : <span class="overview-action-symbol">🛟</span>
                   }
                   label={resolveOverviewContextLabel(contextAction, props.lang)}
-                  disabled={props.disabled || (contextAction === "switch" && !switchTarget)}
-                  pending={contextAction === "reload" ? false : contextAction === "rescue" ? props.registryOverridePending : false}
+                  disabled={
+                    props.disabled ||
+                    (contextAction === "switch" && (!hasSwitchCandidate || props.switchPending)) ||
+                    (contextAction === "reload" && props.reloadPending)
+                  }
+                  pending={
+                    contextAction === "reload"
+                      ? props.reloadPending
+                      : contextAction === "switch"
+                        ? props.switchPending
+                        : props.registryOverridePending
+                  }
                   onClick={() => {
                     if (contextAction === "reload") props.onReloadAccount();
                     else if (contextAction === "rescue") props.onSetRegistryOverride(true);
-                    else if (switchTarget) props.onSwitchAccount(switchTarget.id);
+                    else if (hasSwitchCandidate) props.onSwitchAccount();
                   }}
                 >
                   {resolveOverviewContextLabel(contextAction, props.lang)}
@@ -390,7 +409,7 @@ export function OverviewSection(props: {
                         >
                           <div class="claim-popover-title">{resolveOverviewToolbarLabel("more", props.lang)}</div>
                           {contextAction !== "switch" ? (
-                            <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); props.onSwitchAccount(switchTarget?.id); }} disabled={!switchTarget}>
+                            <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); props.onSwitchAccount(); }} disabled={!hasSwitchCandidate}>
                               ⇄ {resolveOverviewMenuLabel("switch", props.lang)}
                             </button>
                           ) : null}
@@ -414,6 +433,21 @@ export function OverviewSection(props: {
                               🛟 {resolveOverviewMenuLabel(settings.encryptedSyncRegistryOverrideEnabled ? "rescueOff" : "rescue", props.lang)}
                             </button>
                           ) : null}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={(event) => {
+                              if (account.autoSwitchLockedUntil) {
+                                setMoreOpen(false);
+                                props.onSetAutoSwitchLock(0);
+                              } else {
+                                openLockDialog(event.currentTarget);
+                              }
+                            }}
+                          >
+                            {account.autoSwitchLockedUntil ? "🔓" : "🔒"}{" "}
+                            {resolveOverviewMenuLabel(account.autoSwitchLockedUntil ? "unlock" : "lock", props.lang)}
+                          </button>
                           {props.showCliSessions && props.onOpenCliSessions ? (
                             <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); props.onOpenCliSessions!(); }}>
                               ◉ Sessions
@@ -448,10 +482,13 @@ export function OverviewSection(props: {
 }
 
 export function resolveOverviewContextAction(
-  account: Pick<DashboardAccountViewModel, "isActive" | "isCurrentWindowAccount" | "runningDeviceName" | "runningOnThisDevice">,
+  account: Pick<
+    DashboardAccountViewModel,
+    "isActive" | "isCurrentWindowAccount" | "switchQueued" | "runningDeviceName" | "runningOnThisDevice"
+  >,
   registryOverrideEnabled: boolean
 ): "switch" | "reload" | "rescue" {
-  if (account.isActive && !account.isCurrentWindowAccount) return "reload";
+  if (account.switchQueued || (account.isActive && !account.isCurrentWindowAccount)) return "reload";
   if (account.runningDeviceName && !account.runningOnThisDevice && !registryOverrideEnabled) return "rescue";
   return "switch";
 }
@@ -1148,11 +1185,11 @@ export function resolveResetCreditBadgeLabel(lang: DashboardState["lang"]): stri
   return "Reset";
 }
 
-function resolveOverviewMenuLabel(action: "switch" | "reload" | "quota" | "rescue" | "rescueOff" | "lock", lang: DashboardState["lang"]): string {
+function resolveOverviewMenuLabel(action: "switch" | "reload" | "quota" | "rescue" | "rescueOff" | "lock" | "unlock", lang: DashboardState["lang"]): string {
   const values = {
-    en: { switch: "Switch", reload: "Reload", quota: "Quota", rescue: "Rescue", rescueOff: "Rescue off", lock: "Lock" },
-    zh: { switch: "切换", reload: "重载", quota: "配额", rescue: "救援", rescueOff: "关闭救援", lock: "锁定" },
-    "zh-hant": { switch: "切換", reload: "重載", quota: "配額", rescue: "救援", rescueOff: "關閉救援", lock: "鎖定" }
+    en: { switch: "Switch", reload: "Reload", quota: "Quota", rescue: "Rescue", rescueOff: "Rescue off", lock: "Lock", unlock: "Unlock" },
+    zh: { switch: "切换", reload: "重载", quota: "配额", rescue: "救援", rescueOff: "关闭救援", lock: "锁定", unlock: "解锁" },
+    "zh-hant": { switch: "切換", reload: "重載", quota: "配額", rescue: "救援", rescueOff: "關閉救援", lock: "鎖定", unlock: "解鎖" }
   } as const;
   return values[lang === "zh" || lang === "zh-hant" ? lang : "en"][action];
 }

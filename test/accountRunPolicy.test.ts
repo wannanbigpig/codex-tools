@@ -29,4 +29,16 @@ describe("dashboard account run policy", () => {
     expect(canRunAccountOnThisPc(account, false)).toBe(false);
     expect(canRunAccountOnThisPc(account, false, true)).toBe(true);
   });
+
+  it("allows manual switching of a locally disabled account while rescue is active", () => {
+    const account = {
+      enabled: false,
+      runningDeviceName: "Office PC",
+      runningOnThisDevice: false
+    };
+
+    expect(canRunAccountOnThisPc(account, false)).toBe(false);
+    expect(canRunAccountOnThisPc(account, false, true)).toBe(true);
+    expect(canRunAccountOnThisPc({ enabled: false }, false, true)).toBe(true);
+  });
 });

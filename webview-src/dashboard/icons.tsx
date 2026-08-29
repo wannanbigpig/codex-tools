@@ -230,6 +230,15 @@ export function BellIcon() {
   );
 }
 
+export function CodexSessionsIcon() {
+  return (
+    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 7.5A3.5 3.5 0 0 1 8.5 4h7A3.5 3.5 0 0 1 19 7.5v6a3.5 3.5 0 0 1-3.5 3.5H11l-4.2 3v-3.4A3.5 3.5 0 0 1 5 13.5v-6Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+      <path d="m9 10.5 1.8 1.8L15 8.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  );
+}
+
 export function InfoIcon() {
   return (
     <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true">

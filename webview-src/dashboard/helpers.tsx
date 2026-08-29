@@ -153,7 +153,11 @@ export function formatSavedAccountsSummary(
 }
 
 export function resolveOverviewAccount(accounts: DashboardAccountViewModel[]): DashboardAccountViewModel | undefined {
-  return accounts.find((account) => account.isActive) ?? accounts.find((account) => account.isCurrentWindowAccount);
+  return (
+    accounts.find((account) => account.switchQueued) ??
+    accounts.find((account) => account.isActive) ??
+    accounts.find((account) => account.isCurrentWindowAccount)
+  );
 }
 
 export function resolveBrandSubtitle(

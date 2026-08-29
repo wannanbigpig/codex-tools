@@ -3,7 +3,8 @@ import { readFileSync } from "fs";
 import {
   resolveCardHealthReason,
   resolveCompactIdentityBadge,
-  resolvePrimaryAccountControl
+  resolvePrimaryAccountControl,
+  shouldOpenClaimPopover
 } from "../webview-src/dashboard/savedAccountCard";
 
 describe("saved account card presentation", () => {
@@ -29,6 +30,15 @@ describe("saved account card presentation", () => {
         healthMessage: 'API returned 401 - {"error":"Your authentication token has expired"}'
       })
     ).toBe("Needs Reauth");
+  });
+
+  it("only opens the foreign-claim dialog while rescue is locked", () => {
+    expect(shouldOpenClaimPopover(true, false)).toBe(true);
+    expect(shouldOpenClaimPopover(true, true)).toBe(false);
+    expect(shouldOpenClaimPopover(false, false)).toBe(false);
+
+    const source = readFileSync("webview-src/dashboard/savedAccountCard.tsx", "utf8");
+    expect(source).not.toContain("Rescue override is active");
   });
 
   it("opens account details in the details pane instead of flipping the card", () => {

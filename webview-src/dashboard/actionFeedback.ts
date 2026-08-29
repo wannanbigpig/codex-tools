@@ -3,6 +3,12 @@ import type { DashboardActionName, DashboardHostMessage, DashboardNotice } from 
 export function noticeFromActionResult(
   message: Extract<DashboardHostMessage, { type: "dashboard:action-result" }>
 ): DashboardNotice | undefined {
+  if (message.status === "cancelled") {
+    return {
+      level: "warning",
+      message: message.error?.trim() || `${formatActionName(message.action)} was cancelled.`
+    };
+  }
   if (message.status === "failed") {
     let errorMessage = message.error?.trim();
     if (!errorMessage) {

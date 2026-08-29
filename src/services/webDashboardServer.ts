@@ -13,6 +13,7 @@ import { DashboardOAuthCoordinator } from "../presentation/dashboard/oauthCoordi
 import { handleDashboardSettingUpdate, pickDashboardCodexAppPath } from "../presentation/dashboard/settings";
 import { AccountsRepository } from "../storage";
 import { AnnouncementService, type AnnouncementOptions } from "./announcements";
+import type { EncryptedSyncManager } from "./encryptedSync";
 import {
   appendDashboardUsageSnapshot,
   readDashboardDailyUsageCache,
@@ -33,6 +34,8 @@ const MAX_PERSISTED_SESSIONS = 16;
 const MAX_LOGIN_ATTEMPTS = 8;
 const LOGIN_WINDOW_MS = 5 * 60 * 1000;
 const MAX_DASHBOARD_MESSAGE_BYTES = 2 * 1024 * 1024;
+
+export type WebDashboardOpenResult = "opened" | "cancelled" | "unavailable";
 
 type LoginAttempt = { count: number; resetAt: number };
 
@@ -63,14 +66,17 @@ export class WebDashboardServer implements vscode.Disposable {
 
   constructor(
     private readonly context: vscode.ExtensionContext,
-    private readonly repo: AccountsRepository
+    private readonly repo: AccountsRepository,
+    private readonly encryptedSync?: EncryptedSyncManager
   ) {
     this.announcements = new AnnouncementService(context.globalStorageUri.fsPath, context.extensionUri.fsPath);
     this.oauth = new DashboardOAuthCoordinator(repo, () => undefined, async () => {
       if (!getCodexAccountsConfiguration().get<boolean>("encryptedSyncEnabled", false)) {
         return undefined;
       }
-      return vscode.commands.executeCommand<boolean>("codexAccounts.syncNow", { announceSuccess: false });
+      return this.encryptedSync
+        ? this.encryptedSync.syncNow(true, false)
+        : vscode.commands.executeCommand<boolean>("codexAccounts.syncNow", { announceSuccess: false });
     });
   }
 
@@ -121,26 +127,35 @@ export class WebDashboardServer implements vscode.Disposable {
     else await this.stop();
   }
 
-  async openInBrowser(): Promise<void> {
+  async openInBrowser(pathname = "/"): Promise<WebDashboardOpenResult> {
+    if (!isWebDashboardPagePath(pathname)) {
+      throw new Error("The requested Web Dashboard path is invalid.");
+    }
     if (!this.isEnabled()) {
       void vscode.window.showInformationMessage(
         "Web Dashboard setup pending. Enable it in Settings and set a password."
       );
-      return;
+      return "unavailable";
     }
     try {
       await this.start();
       if (!(await this.context.secrets.get(PASSWORD_SECRET_KEY))) {
         await this.promptSetPassword();
         if (!(await this.context.secrets.get(PASSWORD_SECRET_KEY))) {
-          return;
+          return "cancelled";
         }
       }
-      await vscode.env.openExternal(vscode.Uri.parse(this.getUrl()));
+      const opened = await vscode.env.openExternal(vscode.Uri.parse(this.getUrl(pathname)));
+      if (!opened) {
+        void vscode.window.showWarningMessage("The Web Dashboard link was not opened. Try again from the dashboard.");
+        return "unavailable";
+      }
+      return "opened";
     } catch (error) {
       void vscode.window.showErrorMessage(
         `Web Dashboard could not start: ${error instanceof Error ? error.message : String(error)}`
       );
+      throw error;
     }
   }
 
@@ -190,17 +205,19 @@ export class WebDashboardServer implements vscode.Disposable {
     return getCodexAccountsConfiguration().get<boolean>("webDashboardEnabled", false);
   }
 
-  private getUrl(): string {
-    return `http://127.0.0.1:${WEB_DASHBOARD_PORT}/`;
+  private getUrl(pathname = "/"): string {
+    return `http://127.0.0.1:${WEB_DASHBOARD_PORT}${pathname}`;
   }
 
   private async handle(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("X-Content-Type-Options", "nosniff");
     const method = request.method ?? "GET";
-    const path = new URL(request.url ?? "/", this.getUrl()).pathname;
+    const requestUrl = new URL(request.url ?? "/", this.getUrl());
+    const path = requestUrl.pathname;
     if (method === "POST" && path === "/login") {
-      await this.handleLogin(request, response);
+      const requestedReturnPath = requestUrl.searchParams.get("returnTo") ?? "/";
+      await this.handleLogin(request, response, normalizeWebDashboardReturnPath(requestedReturnPath));
       return;
     }
     if (!(await this.isAuthorized(request))) {
@@ -209,7 +226,8 @@ export class WebDashboardServer implements vscode.Disposable {
         this.sendJson(response, { error: "Dashboard session expired" });
         return;
       }
-      this.sendHtml(response, loginPage(Boolean(await this.context.secrets.get(PASSWORD_SECRET_KEY))));
+      const returnPath = normalizeWebDashboardReturnPath(path);
+      this.sendHtml(response, loginPage(Boolean(await this.context.secrets.get(PASSWORD_SECRET_KEY)), "", returnPath));
       return;
     }
     if (method === "GET" && path === "/api/state") {
@@ -224,7 +242,7 @@ export class WebDashboardServer implements vscode.Disposable {
       await this.sendAsset(path, response);
       return;
     }
-    if (method === "GET" && path === "/") {
+    if (method === "GET" && isWebDashboardPagePath(path)) {
       this.sendHtml(response, dashboardPage());
       return;
     }
@@ -232,7 +250,7 @@ export class WebDashboardServer implements vscode.Disposable {
     response.end("Not found");
   }
 
-  private async handleLogin(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  private async handleLogin(request: http.IncomingMessage, response: http.ServerResponse, returnPath: string): Promise<void> {
     const ip = request.socket.remoteAddress ?? "local";
     const now = Date.now();
     const attempt = this.loginAttempts.get(ip);
@@ -261,7 +279,7 @@ export class WebDashboardServer implements vscode.Disposable {
       });
       response.statusCode = 401;
       response.setHeader("Content-Type", "text/html; charset=utf-8");
-      response.end(loginPage(Boolean(stored), "Incorrect password."));
+      response.end(loginPage(Boolean(stored), "Incorrect password.", returnPath));
       return;
     }
     const token = crypto.randomBytes(32).toString("hex");
@@ -272,7 +290,7 @@ export class WebDashboardServer implements vscode.Disposable {
       "Set-Cookie",
       `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}${secure}`
     );
-    response.setHeader("Location", "/");
+    response.setHeader("Location", returnPath);
     response.end();
   }
 
@@ -359,7 +377,18 @@ export class WebDashboardServer implements vscode.Disposable {
             publishState: () => Promise.resolve(),
             oauth: this.oauth,
             announcements: this.announcements,
-            getAnnouncementOptions: () => this.getAnnouncementOptions()
+            getAnnouncementOptions: () => this.getAnnouncementOptions(),
+            hostKind: "browser",
+            configureEncryptedSync: this.encryptedSync
+              ? (passphrase, confirmation) => this.encryptedSync!.configure({ passphrase, confirmation })
+              : undefined,
+            syncEncryptedAccounts: this.encryptedSync
+              ? () => this.encryptedSync!.syncNow(true, false)
+              : undefined,
+            setEncryptedSyncRegistryOverride: this.encryptedSync
+              ? (enabled, passphrase) => this.encryptedSync!.setRegistryOverrideEnabled(enabled, { passphrase })
+              : undefined,
+            setWebDashboardPassword: (password) => this.setPasswordValue(password)
           },
           message
         )
@@ -480,6 +509,14 @@ export function normalizePersistedWebDashboardSessions(
   }
 }
 
+export function isWebDashboardPagePath(pathname: string): boolean {
+  return pathname === "/" || pathname === "/sessions" || /^\/session\/[0-9a-f-]{36}$/i.test(pathname);
+}
+
+export function normalizeWebDashboardReturnPath(pathname: string): string {
+  return isWebDashboardPagePath(pathname) ? pathname : "/";
+}
+
 export function readDashboardRequestBody(request: http.IncomingMessage, maxBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -507,8 +544,9 @@ export function readDashboardRequestBody(request: http.IncomingMessage, maxBytes
   });
 }
 
-function loginPage(configured: boolean, error = ""): string {
-  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codex Manager</title><link rel="icon" href="/assets/codex.svg" type="image/svg+xml"><style>${BASE_CSS}</style><main class="login"><h1>Codex Manager</h1>${configured ? `<p>Enter your Web Dashboard password.</p><form method="post" action="/login"><input name="password" type="password" minlength="${WEB_DASHBOARD_PASSWORD_MIN_LENGTH}" autofocus required placeholder="Password"><button>Unlock dashboard</button></form>${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}` : `<p>Access is locked until a Web Dashboard password is set from the extension settings.</p>`}</main>`;
+function loginPage(configured: boolean, error = "", returnPath = "/"): string {
+  const action = `/login?returnTo=${encodeURIComponent(normalizeWebDashboardReturnPath(returnPath))}`;
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codex Manager</title><link rel="icon" href="/assets/codex.svg" type="image/svg+xml"><style>${BASE_CSS}</style><main class="login"><h1>Codex Manager</h1>${configured ? `<p>Enter your Web Dashboard password.</p><form method="post" action="${action}"><input name="password" type="password" minlength="${WEB_DASHBOARD_PASSWORD_MIN_LENGTH}" autofocus required placeholder="Password"><button>Unlock dashboard</button></form>${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}` : `<p>Access is locked until a Web Dashboard password is set from the extension settings.</p>`}</main>`;
 }
 
 function dashboardPage(): string {
